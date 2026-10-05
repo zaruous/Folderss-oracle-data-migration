@@ -60,7 +60,8 @@ namespace MigrationStudio.Ui.Pages
             SetStep(4, Labels.StepTitles[4], "작업을 골라 Dry Run으로 확인한 뒤 이관합니다. 일시정지는 커밋 경계에서 멈추고, 중지하면 진행 중 배치를 롤백한 뒤 마지막 커밋 키를 체크포인트로 남깁니다.");
             // 위(작업 선택·실행 제어·진행)는 스크롤, 아래(로그·체크포인트)는 분할선으로 높이를 나눈다 — 창 높이를 채우는 본문
             _topScroll = new ScrollViewer { Content = _bodyPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-            _split = new SplitPane(State.Ui.RunSplit, r => State.Ui.RunSplit = r) { Top = _topScroll };
+            // 아래 패널은 로그 카드(머리 40 + 본문)와 좁을 때 그 아래 붙는 체크포인트 카드까지 들어가야 하므로 200px은 확보한다
+            _split = new SplitPane(State.Ui.RunSplit, r => State.Ui.RunSplit = r, 140, 220) { Top = _topScroll };
             SetBodyFill(_split);
             SetFooterHint("F5 시작 · 일시정지 중 F5 = 이어서");
             _presenter.StateChanged += () => Rebuild();
@@ -260,7 +261,7 @@ namespace MigrationStudio.Ui.Pages
             var bottom = new Grid();
             bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
-            bottom.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            bottom.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 100 });
             bottom.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var log = BuildLogCard();
             _cpHost = new Border();
@@ -276,7 +277,9 @@ namespace MigrationStudio.Ui.Pages
                 Grid.SetRow(_cpHost, stacked ? 1 : 0);
                 Grid.SetColumnSpan(_cpHost, stacked ? 2 : 1);
                 Grid.SetColumnSpan(log, stacked ? 2 : 1);
-                _cpHost.MaxHeight = stacked ? 240 : double.PositiveInfinity;
+                // 좁을 때는 로그(2)·체크포인트(1)가 분할선 아래 높이를 비율로 나눈다 — 고정 높이면 작은 창에서 로그가 0px이 된다
+                bottom.RowDefinitions[1].Height = stacked ? new GridLength(2, GridUnitType.Star) : GridLength.Auto;
+                bottom.RowDefinitions[1].MinHeight = stacked ? 70 : 0;
             };
             _split.Bottom = bottom;
 
@@ -718,7 +721,7 @@ namespace MigrationStudio.Ui.Pages
             _logPanel = new StackPanel();
             _logScroll = new ScrollViewer
             {
-                MinHeight = 120,
+                MinHeight = 50,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 Content = _logPanel

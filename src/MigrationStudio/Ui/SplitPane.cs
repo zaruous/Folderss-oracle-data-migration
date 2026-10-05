@@ -21,11 +21,13 @@ namespace MigrationStudio.Ui
         private readonly RowDefinition _bottomRow;
         private readonly GridSplitter _splitter;
         private readonly Action<double> _onRatioChanged;
+        private readonly double _minBottom;
         private double _ratio;
 
         public SplitPane(double topRatio, Action<double> onRatioChanged, double minTop = 140, double minBottom = 120)
         {
             _onRatioChanged = onRatioChanged;
+            _minBottom = minBottom;
             _ratio = Clamp(topRatio);
             _topRow = new RowDefinition { Height = new GridLength(_ratio, GridUnitType.Star), MinHeight = minTop };
             _splitRow = new RowDefinition { Height = GridLength.Auto };
@@ -78,7 +80,7 @@ namespace MigrationStudio.Ui
                 {
                     _topRow.Height = new GridLength(_ratio, GridUnitType.Star);
                     _bottomRow.Height = new GridLength(1 - _ratio, GridUnitType.Star);
-                    _bottomRow.MinHeight = 120;
+                    _bottomRow.MinHeight = _minBottom;
                 }
                 else
                 {

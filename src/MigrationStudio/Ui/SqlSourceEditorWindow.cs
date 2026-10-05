@@ -214,7 +214,8 @@ namespace MigrationStudio.Ui
             columns.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             // 왼쪽: 편집기(위) ↔ 결과(아래)를 분할선으로 나눈다 — 창 높이를 채우고 비율은 끌어서 조절
-            var left = new SplitPane(_host.State.Ui.SqlSplit, r => _host.State.Ui.SqlSplit = r) { Margin = new Thickness(0, 0, 12, 0) };
+            // 편집기 카드 = 머리 40 + 알림·상태 줄 ≈ 100 + 편집기 — 240px은 있어야 편집기가 몇 줄이라도 보인다
+            var left = new SplitPane(_host.State.Ui.SqlSplit, r => _host.State.Ui.SqlSplit = r, 240, 100) { Margin = new Thickness(0, 0, 12, 0) };
             left.Top = BuildEditorCard();
             var tabs = Kit.Segmented(new[]
             {
@@ -241,7 +242,8 @@ namespace MigrationStudio.Ui
                 Grid.SetRow(right, stacked ? 1 : 0);
                 Grid.SetColumnSpan(right, stacked ? 2 : 1);
                 left.Margin = stacked ? new Thickness(0, 0, 0, 10) : new Thickness(0, 0, 12, 0);
-                right.MaxHeight = stacked ? 260 : double.PositiveInfinity;
+                // 좁은 창에서 설정 패널이 아래로 내려오면 높이의 1/3까지만 — 편집기·결과가 남은 높이를 가진다
+                right.MaxHeight = stacked ? Math.Max(120, e.NewSize.Height * 0.33) : double.PositiveInfinity;
             };
             return columns;
         }
@@ -320,7 +322,7 @@ namespace MigrationStudio.Ui
             tools.Children.Add(alias);
 
             // 줄 번호 열과 입력 칸은 같은 줄 높이(17)를 쓰고, 입력 칸이 스크롤하면 줄 번호 열도 같이 스크롤한다
-            _sqlBox.MinHeight = 120;
+            _sqlBox.MinHeight = 40;
             _sqlBox.BorderThickness = new Thickness(0);
             _sqlBox.Padding = new Thickness(6, 4, 6, 4);
             _sqlBox.SetValue(TextBlock.LineHeightProperty, 17.0);
