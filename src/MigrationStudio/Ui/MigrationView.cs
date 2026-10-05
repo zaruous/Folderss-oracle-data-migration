@@ -218,6 +218,7 @@ namespace MigrationStudio.Ui
             if (_window != null)
             {
                 _connections.SetOwner(_window);
+                EnlargeHostWindow(_window);
             }
 
             if (_window != null)
@@ -399,6 +400,27 @@ namespace MigrationStudio.Ui
             _menu.Refresh();
             _rail.Refresh();
             _statusBar.Refresh();
+        }
+
+        /// <summary>
+        /// 본체가 연 900×600 창을 처음 열릴 때 1125×750으로 키운다(<see cref="WindowSizing"/>). 가운데를 유지하고 화면 밖으로 나가지 않게 한다.
+        /// DevHost 캡처·레이아웃 검사는 지정한 크기로 재야 하므로 건드리지 않는다.
+        /// </summary>
+        private static void EnlargeHostWindow(Window window)
+        {
+            if (window == null || AppServices.DevHostCaptureMode || !WindowSizing.IsHostDefault(window.ActualWidth, window.ActualHeight))
+            {
+                return;
+            }
+
+            var area = SystemParameters.WorkArea;
+            var size = WindowSizing.Preferred(area.Width, area.Height);
+            var left = window.Left - (size.Width - window.ActualWidth) / 2;
+            var top = window.Top - (size.Height - window.ActualHeight) / 2;
+            window.Left = Math.Max(area.Left, Math.Min(left, area.Right - size.Width));
+            window.Top = Math.Max(area.Top, Math.Min(top, area.Bottom - size.Height));
+            window.Width = size.Width;
+            window.Height = size.Height;
         }
 
         /// <summary>단계 막대 너비 한계 — 너무 좁으면 글자가 안 보이고, 너무 넓으면 본문이 좁아진다.</summary>
