@@ -26,8 +26,7 @@ namespace MigrationStudio.Ui
         {
             _state = state;
             _onStep = onStep;
-            MinWidth = 208;
-            Width = 208;
+            // 너비는 바깥(MigrationView)의 열이 정한다 — 본문과의 분할선을 끌어 바꾸고, 좁은 창에서는 52px로 접힌다
             SetResourceReference(BackgroundProperty, Theme.PanelBackground);
             BorderThickness = new Thickness(0, 0, 1, 0);
             SetResourceReference(BorderBrushProperty, Theme.Border);
@@ -150,6 +149,14 @@ namespace MigrationStudio.Ui
             SetExtraOpen(true);
         }
 
+        /// <summary>좁은 창(1000px 미만)에서 번호 원만 남기고 접혔는지. 너비는 <see cref="CollapsedChanged"/>를 받은 쪽이 바꾼다.</summary>
+        public bool IsCollapsed
+        {
+            get { return _collapsed; }
+        }
+
+        public event Action<bool> CollapsedChanged;
+
         private void ApplyCollapse(bool collapse)
         {
             if (collapse == _collapsed)
@@ -158,10 +165,13 @@ namespace MigrationStudio.Ui
             }
 
             _collapsed = collapse;
-            Width = collapse ? 52 : 208;
-            MinWidth = collapse ? 52 : 208;
             _headBorder.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
             RebuildSteps();
+            var handler = CollapsedChanged;
+            if (handler != null)
+            {
+                handler(collapse);
+            }
         }
 
         private void RebuildSteps()

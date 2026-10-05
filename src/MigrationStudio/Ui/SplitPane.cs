@@ -93,10 +93,21 @@ namespace MigrationStudio.Ui
 
         private GridSplitter BuildSplitter()
         {
-            // 분할선: 투명한 9px 띠 + 가운데 짧은 손잡이 줄. 끌면 위·아래 행(별 비율)이 같이 바뀐다.
+            var splitter = CreateSplitter(GridResizeDirection.Rows, "끌어서 위·아래 높이 조절");
+            splitter.DragCompleted += OnDragCompleted;
+            return splitter;
+        }
+
+        /// <summary>
+        /// 분할선 하나: 투명한 9px 띠 + 가운데 짧은 손잡이 줄. Rows면 위·아래, Columns면 왼쪽·오른쪽(단계 막대 ↔ 본문)을 나눈다.
+        /// 끌면 이웃한 두 행/열이 같이 바뀐다(PreviousAndNext).
+        /// </summary>
+        internal static GridSplitter CreateSplitter(GridResizeDirection direction, string tooltip)
+        {
+            var rows = direction == GridResizeDirection.Rows;
             var grip = new FrameworkElementFactory(typeof(Border));
-            grip.SetValue(Border.WidthProperty, 36.0);
-            grip.SetValue(Border.HeightProperty, 3.0);
+            grip.SetValue(Border.WidthProperty, rows ? 36.0 : 3.0);
+            grip.SetValue(Border.HeightProperty, rows ? 3.0 : 36.0);
             grip.SetValue(Border.CornerRadiusProperty, new CornerRadius(1.5));
             grip.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center);
             grip.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
@@ -108,20 +119,31 @@ namespace MigrationStudio.Ui
 
             var splitter = new GridSplitter
             {
-                Height = 9,
-                Margin = new Thickness(0, 2, 0, 2),
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Center,
-                ResizeDirection = GridResizeDirection.Rows,
+                ResizeDirection = direction,
                 ResizeBehavior = GridResizeBehavior.PreviousAndNext,
                 Background = Brushes.Transparent,
-                Cursor = Cursors.SizeNS,
                 Template = template,
-                ToolTip = "끌어서 위·아래 높이 조절",
+                ToolTip = tooltip,
                 Tag = "overlay"
             };
-            Kit.NameForAutomation(splitter, "분할선");
-            splitter.DragCompleted += OnDragCompleted;
+            if (rows)
+            {
+                splitter.Height = 9;
+                splitter.Margin = new Thickness(0, 2, 0, 2);
+                splitter.HorizontalAlignment = HorizontalAlignment.Stretch;
+                splitter.VerticalAlignment = VerticalAlignment.Center;
+                splitter.Cursor = Cursors.SizeNS;
+            }
+            else
+            {
+                splitter.Width = 9;
+                splitter.Margin = new Thickness(0);
+                splitter.HorizontalAlignment = HorizontalAlignment.Center;
+                splitter.VerticalAlignment = VerticalAlignment.Stretch;
+                splitter.Cursor = Cursors.SizeWE;
+            }
+
+            Kit.NameForAutomation(splitter, rows ? "분할선(위·아래)" : "분할선(왼쪽·오른쪽)");
             return splitter;
         }
 

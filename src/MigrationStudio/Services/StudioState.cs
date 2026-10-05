@@ -43,6 +43,9 @@ namespace MigrationStudio.Services
         public HashSet<string> RunKnown { get; set; }
         public string LogFilter { get; set; } = "all";
 
+        /// <summary>왼쪽 단계 막대 너비(px) — 본문과의 분할선을 끌어 바꾼다. 좁은 창에서 접힐 때는 이 값과 무관하게 52px.</summary>
+        public double RailWidth { get; set; } = 208;
+
         // 분할 패널(SplitPane) 위쪽 비율 — 끌어서 바꾼 값을 화면을 다시 그려도 유지
         public double RunSplit { get; set; } = 0.55;
         public double TablesSplit { get; set; } = 0.6;

@@ -87,11 +87,34 @@ namespace MigrationStudio.Ui
             _rail = new StepRail(_state, GoToStep);
             _rail.SetFootJobDefinitionAction(ShowJobDefinition);
             _rail.SetFootTemplateExportAction(ExportTemplate);
+            // 왼쪽 단계 막대 ↔ 본문 사이의 세로 분할선: 끌어서 막대 너비를 바꾼다(160~480px, StudioUiState.RailWidth에 유지).
+            // 좁은 창(1000px 미만)에서 막대가 52px로 접히면 분할선은 숨긴다.
+            var railCol = new ColumnDefinition { Width = new GridLength(ClampRailWidth(_state.Ui.RailWidth)), MinWidth = 52, MaxWidth = 480 };
+            body.ColumnDefinitions.Add(railCol);
             body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             Grid.SetColumn(_rail, 0);
             body.Children.Add(_rail);
-            Grid.SetColumn(_pageHost, 1);
+            var railSplitter = SplitPane.CreateSplitter(GridResizeDirection.Columns, "끌어서 단계 막대 너비 조절");
+            Grid.SetColumn(railSplitter, 1);
+            body.Children.Add(railSplitter);
+            railSplitter.DragCompleted += (s, e) =>
+            {
+                if (_rail.IsCollapsed)
+                {
+                    return;
+                }
+
+                var width = ClampRailWidth(railCol.ActualWidth);
+                railCol.Width = new GridLength(width);
+                _state.Ui.RailWidth = width;
+            };
+            _rail.CollapsedChanged += collapsed =>
+            {
+                railCol.Width = new GridLength(collapsed ? 52 : ClampRailWidth(_state.Ui.RailWidth));
+                railSplitter.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+            };
+            Grid.SetColumn(_pageHost, 2);
             body.Children.Add(_pageHost);
             Children.Add(body);
 
@@ -376,6 +399,17 @@ namespace MigrationStudio.Ui
             _menu.Refresh();
             _rail.Refresh();
             _statusBar.Refresh();
+        }
+
+        /// <summary>단계 막대 너비 한계 — 너무 좁으면 글자가 안 보이고, 너무 넓으면 본문이 좁아진다.</summary>
+        private static double ClampRailWidth(double width)
+        {
+            if (double.IsNaN(width) || width <= 0)
+            {
+                return 208;
+            }
+
+            return Math.Max(160, Math.Min(480, width));
         }
 
         /// <summary>DevHost 검수용 — 단계 막대의 ▽(작업 정의·매핑 템플릿)를 펼친 상태로.</summary>
