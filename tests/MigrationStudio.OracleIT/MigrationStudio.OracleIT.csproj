@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    실제 Oracle(docker oracle-12c)에 붙어 어댑터를 실측한다. ORACLE_IT_DSN(예: localhost:1521/xe)이 없으면 전부 건너뛴다.
+    ORACLE_IT_SYS_PW(기본 oracle, SYSTEM 계정)로 시험 사용자를 만들고 지운다(ORACLE_IT_KEEP=1이면 남김).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MigrationStudio.Core\MigrationStudio.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

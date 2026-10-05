@@ -1,0 +1,376 @@
+{
+  "schema": "LEGACY_APP",
+  "tables": [
+    {
+      "name": "SRC_CUSTOMER",
+      "kind": "TABLE",
+      "rows": 1240325,
+      "avgRowLength": 96,
+      "comment": "고객",
+      "columns": [
+        {
+          "name": "CUSTOMER_ID",
+          "type": "NUMBER(12)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "고객 번호",
+          "stats": {
+            "nulls": 0,
+            "distinct": 1240325,
+            "max": 1240325
+          }
+        },
+        {
+          "name": "CUSTOMER_NM",
+          "type": "VARCHAR2(100)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "고객명",
+          "stats": {
+            "nulls": 0,
+            "blanks": 37,
+            "maxLength": 42
+          }
+        },
+        {
+          "name": "PHONE_NO",
+          "type": "VARCHAR2(30)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "전화번호",
+          "stats": {
+            "nulls": 1204,
+            "maxLength": 18,
+            "digitsMaxLength": 13
+          }
+        },
+        {
+          "name": "STATUS_CD",
+          "type": "CHAR(1)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "상태(A 사용·I 휴면·D 탈퇴)",
+          "stats": {
+            "nulls": 0,
+            "distinct": 3
+          }
+        },
+        {
+          "name": "GRADE_CD",
+          "type": "VARCHAR2(2)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "등급 코드",
+          "stats": {
+            "nulls": 2210,
+            "distinct": 6
+          }
+        },
+        {
+          "name": "REG_DT",
+          "type": "DATE",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "등록일",
+          "stats": {
+            "nulls": 0
+          }
+        },
+        {
+          "name": "MOD_DT",
+          "type": "DATE",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "수정일",
+          "stats": {
+            "nulls": 182004
+          }
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "SRC_CUSTOMER_GRADE",
+      "kind": "TABLE",
+      "rows": 6,
+      "avgRowLength": 40,
+      "comment": "고객 등급",
+      "columns": [
+        {
+          "name": "GRADE_CD",
+          "type": "VARCHAR2(2)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "등급 코드",
+          "stats": {}
+        },
+        {
+          "name": "GRADE_NM",
+          "type": "VARCHAR2(50)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "등급 이름",
+          "stats": {
+            "maxLength": 12
+          }
+        },
+        {
+          "name": "SORT_SEQ",
+          "type": "NUMBER(3)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "정렬 순서",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "SRC_ORDER",
+      "kind": "TABLE",
+      "rows": 8420117,
+      "avgRowLength": 74,
+      "comment": "주문",
+      "columns": [
+        {
+          "name": "ORDER_NO",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "주문 번호",
+          "stats": {
+            "maxLength": 17
+          }
+        },
+        {
+          "name": "CUSTOMER_ID",
+          "type": "NUMBER(12)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "고객 번호",
+          "stats": {}
+        },
+        {
+          "name": "ORDER_DT",
+          "type": "DATE",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "주문 일시",
+          "stats": {}
+        },
+        {
+          "name": "ORDER_AMT",
+          "type": "NUMBER(15,2)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "주문 금액",
+          "stats": {
+            "max": 48200000
+          }
+        },
+        {
+          "name": "ORDER_STAT_CD",
+          "type": "VARCHAR2(2)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "주문 상태 코드",
+          "stats": {}
+        },
+        {
+          "name": "PAY_METHOD",
+          "type": "VARCHAR2(10)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "결제 수단",
+          "stats": {}
+        },
+        {
+          "name": "REG_DT",
+          "type": "DATE",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "등록일",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "SRC_ORDER_ITEM",
+      "kind": "TABLE",
+      "rows": 21904551,
+      "avgRowLength": 52,
+      "comment": "주문 품목",
+      "columns": [
+        {
+          "name": "ORDER_NO",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "ITEM_SEQ",
+          "type": "NUMBER(4)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "PRODUCT_CD",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "QTY",
+          "type": "NUMBER(7)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "UNIT_PRICE",
+          "type": "NUMBER(12,2)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "SRC_PRODUCT",
+      "kind": "TABLE",
+      "rows": 48210,
+      "avgRowLength": 120,
+      "comment": "상품",
+      "columns": [
+        {
+          "name": "PRODUCT_CD",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "PRODUCT_NM",
+          "type": "VARCHAR2(200)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "CATEGORY_CD",
+          "type": "VARCHAR2(10)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "PRICE",
+          "type": "NUMBER(12,2)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "USE_FLAG",
+          "type": "CHAR(1)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "SRC_CODE_MST",
+      "kind": "TABLE",
+      "rows": 1204,
+      "avgRowLength": 60,
+      "comment": "공통 코드",
+      "columns": [
+        {
+          "name": "CODE_GRP",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "CODE",
+          "type": "VARCHAR2(20)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "CODE_NM",
+          "type": "VARCHAR2(100)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "V_CUSTOMER_SUMMARY",
+      "kind": "VIEW",
+      "avgRowLength": 0,
+      "comment": "고객 요약 뷰",
+      "columns": [
+        {
+          "name": "CUSTOMER_ID",
+          "type": "NUMBER(12)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "ORDER_CNT",
+          "type": "NUMBER",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "TOTAL_AMT",
+          "type": "NUMBER",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    }
+  ],
+  "loadedAt": "0001-01-01T00:00:00",
+  "elapsedMs": 0,
+  "cached": false
+}

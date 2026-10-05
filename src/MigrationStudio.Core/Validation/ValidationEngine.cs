@@ -1,0 +1,1196 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using MigrationStudio.Core.Adapters;
+using MigrationStudio.Core.Adapters.Oracle;
+using MigrationStudio.Core.Engine;
+using MigrationStudio.Core.Mapping;
+using MigrationStudio.Core.Metadata;
+using MigrationStudio.Core.Model;
+using MigrationStudio.Core.Settings;
+using MigrationStudio.Core.Sql;
+using MigrationStudio.Core.Text;
+using MigrationStudio.Core.Types;
+using MappingModel = MigrationStudio.Core.Model.Mapping;
+
+namespace MigrationStudio.Core.Validation
+{
+    public sealed class ValidationEngine
+    {
+        private static readonly string[] SqlChecks =
+        {
+            "SQL 구문", "원본 객체·열", "결과 열 수", "별칭", "바인드 변수", "체크포인트"
+        };
+
+        private static readonly Regex TruncRx = new Regex(@"잘림", RegexOptions.CultureInvariant);
+        private static readonly Regex PrecRx = new Regex(@"정수부|소수부|정밀도", RegexOptions.CultureInvariant);
+        private static readonly Regex NnRx = new Regex(@"NOT NULL|NULL이 오면|NULL \d|NULL [\d,]+행|빈 문자열", RegexOptions.CultureInvariant);
+
+        private const long SampleRowThreshold = 1_000_000;
+        private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(60);
+
+        private readonly IDatabaseAdapter _adapter;
+
+        public ValidationEngine(IDatabaseAdapter adapter)
+        {
+            _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
+        }
+
+        public async Task<List<ValidationItem>> RunPreAsync(
+            ValidationContext ctx,
+            Action<ValidationItem> onItem,
+            CancellationToken ct)
+        {
+            var items = new List<ValidationItem>();
+            if (ctx == null)
+            {
+                return items;
+            }
+
+            var job = ctx.Job;
+            var used = (job != null && job.Mappings != null)
+                ? job.Mappings.Where(m => m.Use).ToList()
+                : new List<MappingModel>();
+            var tables = used.Where(m => !m.IsSql).ToList();
+            var sqls = used.Where(m => m.IsSql).ToList();
+
+            await RunConnectionAsync(ctx, items, onItem, ct).ConfigureAwait(false);
+
+            var srcMeta = ctx.SourceMeta;
+            var tgtMeta = ctx.TargetMeta;
+            if (srcMeta == null || tgtMeta == null)
+            {
+                Emit(items, onItem, Item("객체", "메타데이터", "", CheckLevels.Error,
+                    "원본·대상 메타데이터를 먼저 불러오세요", Fix("connection")));
+                return items;
+            }
+
+            await RunObjectsAsync(ctx, items, onItem, used, tables, srcMeta, tgtMeta, ct).ConfigureAwait(false);
+            if (used.Count == 0)
+            {
+                return items;
+            }
+
+            await RunSqlMappingsAsync(ctx, items, onItem, sqls, srcMeta, tgtMeta, ct).ConfigureAwait(false);
+
+            Dictionary<string, Dictionary<string, ColumnStats>> measured = null;
+            if (ctx.Source != null)
+            {
+                var profiler = new ExpressionProfiler(_adapter);
+                measured = await profiler.ProfileAsync(ctx, used, m => SourceOf(m, srcMeta, ctx), ct).ConfigureAwait(false);
+            }
+
+            var issueBuckets = await RunColumnMappingsAsync(ctx, items, onItem, used, srcMeta, tgtMeta, null, ct).ConfigureAwait(false);
+            MergeMeasuredIssues(issueBuckets, used, srcMeta, tgtMeta, ctx, measured);
+            await RunFormatAsync(items, onItem, issueBuckets, measured).ConfigureAwait(false);
+            await RunConstraintsAsync(ctx, items, onItem, used, srcMeta, tgtMeta, measured, ct).ConfigureAwait(false);
+            await RunPlanningAsync(ctx, items, onItem, used, srcMeta, tgtMeta, ct).ConfigureAwait(false);
+
+            return items;
+        }
+
+        private async Task RunConnectionAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            CancellationToken ct)
+        {
+            await RunConnectionRoleAsync(ctx, items, onItem, true, ct).ConfigureAwait(false);
+            await RunConnectionRoleAsync(ctx, items, onItem, false, ct).ConfigureAwait(false);
+        }
+
+        private async Task RunConnectionRoleAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            bool source,
+            CancellationToken ct)
+        {
+            var label = source ? "원본 접속" : "대상 접속";
+            var profile = source ? ctx.SourceProfile : ctx.TargetProfile;
+            var target = source ? ctx.Source : ctx.Target;
+            if (profile == null || target == null)
+            {
+                Emit(items, onItem, Item("접속", label, "", CheckLevels.Error,
+                    "마이그레이션 설정에서 접속을 고르세요", Fix("connection")));
+                return;
+            }
+
+            if (!source && profile.WriteBlocked)
+            {
+                Emit(items, onItem, Item("접속", label, profile.Name, CheckLevels.Error,
+                    "\"쓰기 금지\"로 설정된 접속은 대상으로 쓸 수 없습니다(마이그레이션 설정)", Fix("connection")));
+                return;
+            }
+
+            var cached = source ? ctx.SourceTest : ctx.TargetTest;
+            ConnectionTestResult result;
+            if (cached != null)
+            {
+                result = cached;
+            }
+            else
+            {
+                try
+                {
+                    result = await WithQueryTimeout(
+                        token => _adapter.TestAsync(target, source, token),
+                        ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Emit(items, onItem, Item("접속", label, profile.Name, CheckLevels.Error, ex.Message, Fix("connection")));
+                    return;
+                }
+            }
+
+            if (result.Ok)
+            {
+                var detail = (result.Version ?? "Oracle") + " · "
+                    + (result.LatencyMs != null ? result.LatencyMs.Value.ToString(CultureInfo.InvariantCulture) : "?")
+                    + " ms · " + profile.Host + ":" + profile.Port.ToString(CultureInfo.InvariantCulture) + "/" + profile.Service
+                    + (source ? " · 읽기 전용(SELECT만)" : "");
+                Emit(items, onItem, Item("접속", label, profile.Name, CheckLevels.Pass, detail, null));
+            }
+            else
+            {
+                Emit(items, onItem, Item("접속", label, profile.Name, CheckLevels.Error,
+                    result.Error ?? "접속 실패", Fix("connection")));
+            }
+        }
+
+        private async Task RunObjectsAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            List<MappingModel> used,
+            List<MappingModel> tables,
+            SchemaMetadata srcMeta,
+            SchemaMetadata tgtMeta,
+            CancellationToken ct)
+        {
+            var missingSrc = tables.Where(m => srcMeta.FindTable(m.Source) == null).Select(m => m.Source).ToList();
+            if (tables.Count > 0)
+            {
+                var level = missingSrc.Count > 0 ? CheckLevels.Error : CheckLevels.Pass;
+                var detail = missingSrc.Count > 0
+                    ? "ORA-00942: 없음 — " + string.Join(", ", missingSrc) + " — 메타데이터를 다시 불러오세요"
+                    : string.Join(", ", tables.Select(m => m.Source)) + " (" + tables.Count.ToString(CultureInfo.InvariantCulture) + "개)";
+                Emit(items, onItem, Item("객체", "원본 테이블 존재", srcMeta.Schema, level, detail,
+                    missingSrc.Count > 0 ? Fix("tables") : null));
+            }
+
+            if (ctx.Source != null && tables.Count > 0)
+            {
+                await VerifyExistingAsync(ctx, items, onItem, srcMeta.Schema, tables.Select(m => m.Source), missingSrc, true, ct)
+                    .ConfigureAwait(false);
+            }
+
+            var targets = used.Select(m => m.Target).Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal).ToList();
+            var missingTgt = targets.Where(n => tgtMeta.FindTable(n) == null).ToList();
+            var noTarget = used.Any(m => string.IsNullOrEmpty(m.Target));
+            var tgtLevel = missingTgt.Count > 0 || noTarget ? CheckLevels.Error : CheckLevels.Pass;
+            var tgtDetail = missingTgt.Count > 0
+                ? "ORA-00942: 없음 — " + string.Join(", ", missingTgt) + " — 메타데이터를 다시 불러오세요"
+                : noTarget
+                    ? "대상 테이블을 고르지 않은 매핑이 있습니다"
+                    : string.Join(", ", targets);
+            Emit(items, onItem, Item("객체", "대상 테이블 존재", tgtMeta.Schema, tgtLevel, tgtDetail,
+                missingTgt.Count > 0 ? Fix("tables") : null));
+
+            if (ctx.Target != null && targets.Count > 0)
+            {
+                await VerifyExistingAsync(ctx, items, onItem, tgtMeta.Schema, targets, missingTgt, false, ct)
+                    .ConfigureAwait(false);
+            }
+
+            if (used.Count == 0)
+            {
+                Emit(items, onItem, Item("객체", "이관 대상", "", CheckLevels.Error, "사용하는 매핑이 없습니다", Fix("tables")));
+            }
+        }
+
+        private async Task VerifyExistingAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            string schema,
+            IEnumerable<string> names,
+            IList<string> alreadyMissing,
+            bool source,
+            CancellationToken ct)
+        {
+            try
+            {
+                var chunks = ValidationSql.ExistingTables(schema, names);
+                var found = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var sql in chunks)
+                {
+                    var qr = await SafeQueryAsync(source ? ctx.Source : ctx.Target, schema, sql, ct).ConfigureAwait(false);
+                    if (qr == null)
+                    {
+                        return;
+                    }
+
+                    foreach (var row in qr.Rows ?? new List<string[]>())
+                    {
+                        if (row.Length > 0)
+                        {
+                            found.Add(row[0].ToUpperInvariant());
+                        }
+                    }
+                }
+
+                var expected = names.Select(n => n.ToUpperInvariant()).Distinct().ToList();
+                var dbMissing = expected.Where(n => !found.Contains(n) && (alreadyMissing == null || !alreadyMissing.Contains(n, StringComparer.OrdinalIgnoreCase))).ToList();
+                if (dbMissing.Count == 0)
+                {
+                    return;
+                }
+
+                var label = source ? "원본 테이블 존재" : "대상 테이블 존재";
+                Emit(items, onItem, Item("객체", label, schema, CheckLevels.Error,
+                    "ORA-00942: 없음 — " + string.Join(", ", dbMissing) + " — 메타데이터를 다시 불러오세요", Fix("tables")));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+            }
+        }
+
+        private async Task RunSqlMappingsAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            List<MappingModel> sqls,
+            SchemaMetadata srcMeta,
+            SchemaMetadata tgtMeta,
+            CancellationToken ct)
+        {
+            if (sqls.Count == 0 || ctx.Source == null)
+            {
+                foreach (var m in sqls)
+                {
+                    if (ctx.Source == null)
+                    {
+                        Emit(items, onItem, Item("매핑", "원본 SQL", LabelOf(m), CheckLevels.Error,
+                            "원본 접속이 없어 SQL을 검증할 수 없습니다", Fix("sql", m.Id)));
+                    }
+                }
+
+                return;
+            }
+
+            var svc = new SqlSourceService(_adapter);
+            foreach (var m in sqls)
+            {
+                SqlValidationResult v;
+                try
+                {
+                    v = await svc.ValidateAsync(m, ctx.Source, srcMeta.Schema, srcMeta, tgtMeta, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Emit(items, onItem, Item("매핑", "원본 SQL", LabelOf(m), CheckLevels.Error, ex.Message, Fix("sql", m.Id)));
+                    continue;
+                }
+
+                var own = v.Items.Where(i => SqlChecks.Contains(i.Check)).ToList();
+                var bad = own.Where(i => i.Level != CheckLevels.Pass).ToList();
+                var level = CheckLevels.Worst(own.Select(i => i.Level));
+                string detail;
+                if (bad.Count > 0)
+                {
+                    detail = string.Join("\n", bad.Select(i => i.Check + ": " + (i.Detail ?? "").Split('\n')[0]));
+                }
+                else
+                {
+                    var binds = m.Binds != null ? string.Join(", ", m.Binds.Select(b => ":" + b.Name)) : "없음";
+                    if (string.IsNullOrEmpty(binds))
+                    {
+                        binds = "없음";
+                    }
+
+                    detail = "구문·객체·별칭 통과 · 결과 열 " + (v.Columns != null ? v.Columns.Count.ToString(CultureInfo.InvariantCulture) : "0")
+                        + "개 · 바인드 " + binds;
+                }
+
+                Emit(items, onItem, Item("매핑", "원본 SQL", LabelOf(m), level, detail, Fix("sql", m.Id), m.Id));
+            }
+        }
+
+        private sealed class IssueEntry
+        {
+            public MappingModel Mapping;
+            public TableMetadata Source;
+            public ColumnResult Result;
+            public CheckMessage Message;
+        }
+
+        private sealed class IssueBuckets
+        {
+            public List<IssueEntry> Compat = new List<IssueEntry>();
+            public List<IssueEntry> Trunc = new List<IssueEntry>();
+            public List<IssueEntry> Prec = new List<IssueEntry>();
+            public List<IssueEntry> Nn = new List<IssueEntry>();
+        }
+
+        private async Task<IssueBuckets> RunColumnMappingsAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            List<MappingModel> used,
+            SchemaMetadata srcMeta,
+            SchemaMetadata tgtMeta,
+            Dictionary<string, Dictionary<string, ColumnStats>> measured,
+            CancellationToken ct)
+        {
+            var buckets = new IssueBuckets();
+            foreach (var tm in used)
+            {
+                var s = SourceOf(tm, srcMeta, ctx);
+                var t = tgtMeta.FindTable(tm.Target);
+                if (s == null || t == null || (s.IsVirtual && (s.Columns == null || s.Columns.Count == 0)))
+                {
+                    continue;
+                }
+
+                IReadOnlyDictionary<string, ColumnStats> mapMeasured = null;
+                if (measured != null && measured.TryGetValue(tm.Id, out var md))
+                {
+                    mapMeasured = md;
+                }
+
+                var st = MappingService.Status(tm, s, t, mapMeasured);
+                var unmapped = st.Results
+                    .Where(r => string.IsNullOrEmpty(MappingService.ValueSource(r.Mapping))
+                        && !(r.Mapping.DefaultValue != null && r.Mapping.NullRule != NullRules.Allow))
+                    .Select(r => r.Target.Name + (r.Check.Level == CheckLevels.Error ? "(NOT NULL — 제약 참고)" : ""))
+                    .ToList();
+                var keyMissing = WriteModes.Of(tm.Mode).NeedsKey && (tm.MergeKey == null || tm.MergeKey.Count == 0);
+                var colLevel = keyMissing ? CheckLevels.Error : unmapped.Count > 0 ? CheckLevels.Info : CheckLevels.Pass;
+                var colDetail = st.Mapped + " / " + st.Total + " 컬럼"
+                    + (unmapped.Count > 0 ? " · 비워 둠: " + string.Join(", ", unmapped) : "")
+                    + (keyMissing ? " · " + WriteModes.Of(tm.Mode).Label + "에 병합 키가 없음" : "");
+                Emit(items, onItem, Item("매핑", "컬럼 매핑", LabelOf(tm), colLevel, colDetail, Fix("columns", tm.Id), tm.Id));
+
+                foreach (var r in st.Results)
+                {
+                    foreach (var msg in r.Check.Messages)
+                    {
+                        if (msg.Level == CheckLevels.Pass || msg.Level == CheckLevels.Info)
+                        {
+                            continue;
+                        }
+
+                        var entry = new IssueEntry { Mapping = tm, Source = s, Result = r, Message = msg };
+                        if (NnRx.IsMatch(msg.Message))
+                        {
+                            buckets.Nn.Add(entry);
+                        }
+                        else if (TruncRx.IsMatch(msg.Message))
+                        {
+                            buckets.Trunc.Add(entry);
+                        }
+                        else if (PrecRx.IsMatch(msg.Message))
+                        {
+                            buckets.Prec.Add(entry);
+                        }
+                        else
+                        {
+                            buckets.Compat.Add(entry);
+                        }
+                    }
+                }
+            }
+
+            await Task.CompletedTask;
+            return buckets;
+        }
+
+        private static void MergeMeasuredIssues(
+            IssueBuckets buckets,
+            IList<MappingModel> used,
+            SchemaMetadata srcMeta,
+            SchemaMetadata tgtMeta,
+            ValidationContext ctx,
+            Dictionary<string, Dictionary<string, ColumnStats>> measured)
+        {
+            if (measured == null)
+            {
+                return;
+            }
+
+            foreach (var tm in used)
+            {
+                var s = SourceOf(tm, srcMeta, ctx);
+                var t = tgtMeta.FindTable(tm.Target);
+                if (s == null || t == null)
+                {
+                    continue;
+                }
+
+                measured.TryGetValue(tm.Id, out var mapMeasured);
+                var st = MappingService.Status(tm, s, t, mapMeasured);
+                foreach (var r in st.Results)
+                {
+                    foreach (var msg in r.Check.Messages)
+                    {
+                        if (msg.Level == CheckLevels.Pass || msg.Level == CheckLevels.Info)
+                        {
+                            continue;
+                        }
+
+                        var entry = new IssueEntry { Mapping = tm, Source = s, Result = r, Message = msg };
+                        if (NnRx.IsMatch(msg.Message))
+                        {
+                            if (!buckets.Nn.Any(x => x.Result.Target.Name == r.Target.Name && x.Mapping.Id == tm.Id))
+                            {
+                                buckets.Nn.Add(entry);
+                            }
+                        }
+                        else if (TruncRx.IsMatch(msg.Message))
+                        {
+                            if (!buckets.Trunc.Any(x => x.Result.Target.Name == r.Target.Name && x.Mapping.Id == tm.Id))
+                            {
+                                buckets.Trunc.Add(entry);
+                            }
+                        }
+                        else if (PrecRx.IsMatch(msg.Message))
+                        {
+                            if (!buckets.Prec.Any(x => x.Result.Target.Name == r.Target.Name && x.Mapping.Id == tm.Id))
+                            {
+                                buckets.Prec.Add(entry);
+                            }
+                        }
+                        else if (!buckets.Compat.Any(x => x.Result.Target.Name == r.Target.Name && x.Mapping.Id == tm.Id))
+                        {
+                            buckets.Compat.Add(entry);
+                        }
+                    }
+                }
+            }
+        }
+
+        private Task RunFormatAsync(
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            IssueBuckets buckets,
+            Dictionary<string, Dictionary<string, ColumnStats>> measured)
+        {
+            if (buckets.Compat.Count > 0)
+            {
+                foreach (var e in buckets.Compat)
+                {
+                    Emit(items, onItem, FormatItem("데이터 형식 호환성", e, null));
+                }
+            }
+            else
+            {
+                Emit(items, onItem, Item("형식", "데이터 형식 호환성", "", CheckLevels.Pass, "매핑한 열의 형식이 모두 호환됨", null));
+            }
+
+            if (buckets.Trunc.Count > 0)
+            {
+                foreach (var e in buckets.Trunc)
+                {
+                    var sample = SampleTag(e.Source, e.Mapping);
+                    Emit(items, onItem, FormatItem("VARCHAR 길이", e, sample));
+                }
+            }
+            else
+            {
+                Emit(items, onItem, Item("형식", "VARCHAR 길이", "", CheckLevels.Pass, "문자 열 길이가 모두 충분함", null));
+            }
+
+            if (buckets.Prec.Count > 0)
+            {
+                foreach (var e in buckets.Prec)
+                {
+                    var sample = SampleTag(e.Source, e.Mapping);
+                    Emit(items, onItem, FormatItem("NUMBER 정밀도", e, sample));
+                }
+            }
+            else
+            {
+                Emit(items, onItem, Item("형식", "NUMBER 정밀도", "", CheckLevels.Pass, "숫자 정밀도가 모두 충분함", null));
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private ValidationItem FormatItem(string check, IssueEntry e, string sample)
+        {
+            var info = MappingService.SourceInfo(e.Result.Mapping, e.Source.Columns);
+            var typeLine = (e.Result.Mapping.Source ?? "식") + " "
+                + ((info != null && info.Type != null) ? info.Type : "?") + " → "
+                + e.Result.Target.Name + " " + e.Result.Target.Type;
+            var msg = e.Message.Message;
+            if (check == "VARCHAR 길이")
+            {
+                msg = Regex.Replace(msg, @"^.*?잘림 위험", "잘림 위험(Truncation Risk)");
+            }
+
+            return Item("형식", check, e.Mapping.Target, e.Message.Level, typeLine + "\n" + msg,
+                Fix("columns", e.Mapping.Id, e.Result.Target.Name), e.Mapping.Id, sample);
+        }
+
+        private async Task RunConstraintsAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            List<MappingModel> used,
+            SchemaMetadata srcMeta,
+            SchemaMetadata tgtMeta,
+            Dictionary<string, Dictionary<string, ColumnStats>> measured,
+            CancellationToken ct)
+        {
+            var nnIssues = new List<IssueEntry>();
+            foreach (var tm in used)
+            {
+                var s = SourceOf(tm, srcMeta, ctx);
+                var t = tgtMeta.FindTable(tm.Target);
+                if (s == null || t == null)
+                {
+                    continue;
+                }
+
+                IReadOnlyDictionary<string, ColumnStats> mapMeasured = null;
+                if (measured != null && measured.TryGetValue(tm.Id, out var md))
+                {
+                    mapMeasured = md;
+                }
+
+                var st = MappingService.Status(tm, s, t, mapMeasured);
+                foreach (var r in st.Results)
+                {
+                    if (!r.Target.Nullable && r.Check.Level == CheckLevels.Error)
+                    {
+                        var err = r.Check.Messages.FirstOrDefault(m => m.Level == CheckLevels.Error);
+                        if (err != null)
+                        {
+                            nnIssues.Add(new IssueEntry { Mapping = tm, Source = s, Result = r, Message = err });
+                            continue;
+                        }
+                    }
+
+                    foreach (var msg in r.Check.Messages)
+                    {
+                        if (msg.Level == CheckLevels.Pass || msg.Level == CheckLevels.Info)
+                        {
+                            continue;
+                        }
+
+                        if (NnRx.IsMatch(msg.Message))
+                        {
+                            nnIssues.Add(new IssueEntry { Mapping = tm, Source = s, Result = r, Message = msg });
+                        }
+                    }
+                }
+            }
+
+            if (nnIssues.Count > 0)
+            {
+                foreach (var e in nnIssues)
+                {
+                    var sample = SampleTag(e.Source, e.Mapping);
+                    Emit(items, onItem, Item("제약", "NOT NULL", e.Mapping.Target + "." + e.Result.Target.Name,
+                        e.Message.Level, e.Message.Message, Fix("columns", e.Mapping.Id, e.Result.Target.Name), e.Mapping.Id, sample));
+                }
+            }
+            else
+            {
+                Emit(items, onItem, Item("제약", "NOT NULL", "", CheckLevels.Pass, "NOT NULL 컬럼에 모두 값이 들어감", null));
+            }
+
+            foreach (var tm in used)
+            {
+                var t = tgtMeta.FindTable(tm.Target);
+                var s = SourceOf(tm, srcMeta, ctx);
+                if (t == null || s == null || (s.IsVirtual && (s.Columns == null || s.Columns.Count == 0)))
+                {
+                    continue;
+                }
+
+                await EmitPkAsync(items, onItem, tm, s, t, ct).ConfigureAwait(false);
+                await EmitDuplicateAsync(ctx, items, onItem, tm, s, t, ct).ConfigureAwait(false);
+                await EmitFksAsync(items, onItem, tm, t, used, tgtMeta, ctx, srcMeta, ct).ConfigureAwait(false);
+            }
+        }
+
+        private Task EmitPkAsync(
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            MappingModel tm,
+            TableMetadata s,
+            TableMetadata t,
+            CancellationToken ct)
+        {
+            var pk = t.Columns.Where(c => c.PrimaryKey).Select(c => c.Name).ToList();
+            var keys = tm.MergeKey ?? new List<string>();
+            var needKey = WriteModes.Of(tm.Mode).NeedsKey;
+            var pkMapped = pk.All(k =>
+            {
+                var c = tm.FindColumn(k);
+                return c != null && !string.IsNullOrEmpty(MappingService.ValueSource(c));
+            });
+            var level = pkMapped ? CheckLevels.Pass : CheckLevels.Error;
+            var detail = "대상 PK " + string.Join(", ", pk)
+                + (pkMapped
+                    ? " ← " + string.Join(", ", pk.Select(k =>
+                    {
+                        var c = tm.FindColumn(k);
+                        return c != null ? (c.Source ?? "식") : "?";
+                    }))
+                    : " 매핑 없음");
+            if (needKey && keys.Count > 0 && string.Join(",", keys) != string.Join(",", pk))
+            {
+                level = CheckLevels.Worst(new[] { level, CheckLevels.Warn });
+                detail += "\n병합 키(" + string.Join(", ", keys) + ")가 PK가 아님 — 한 행이 여러 대상 행과 맞으면 ORA-30926";
+            }
+
+            Emit(items, onItem, Item("제약", "PK / Unique Key", tm.Target, level, detail, Fix("columns", tm.Id), tm.Id));
+            return Task.CompletedTask;
+        }
+
+        private async Task EmitDuplicateAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            MappingModel tm,
+            TableMetadata s,
+            TableMetadata t,
+            CancellationToken ct)
+        {
+            var keys = tm.MergeKey ?? new List<string>();
+            if (keys.Count == 0)
+            {
+                keys = t.Columns.Where(c => c.PrimaryKey).Select(c => c.Name).ToList();
+            }
+
+            var sample = SampleTag(s, tm);
+            var sqlCap = tm.IsSql;
+            var useSample = !tm.IsSql && s.Rows != null && s.Rows.Value > SampleRowThreshold;
+
+            if (string.Equals(tm.Mode, WriteModes.InsertOnly, StringComparison.Ordinal))
+            {
+                long? rows = t.Rows;
+                if (rows == null && ctx.Target != null)
+                {
+                    var sql = ValidationSql.TargetRowCount(ctx.TargetMeta.Schema, tm.Target);
+                    rows = await SafeCountAsync(ctx.Target, ctx.TargetMeta.Schema, sql, ct).ConfigureAwait(false);
+                }
+
+                if (rows != null && rows.Value > 0)
+                {
+                    Emit(items, onItem, Item("제약", "중복 키", tm.Target, CheckLevels.Warn,
+                        "대상에 이미 " + Format.Number(rows.Value) + "행 있음 — INSERT ONLY면 같은 키는 ORA-00001로 거부됨. INSERT + UPDATE를 검토하세요",
+                        Fix("tables", tm.Id), tm.Id, null));
+                    return;
+                }
+            }
+
+            if (ctx.Source == null || keys.Count == 0)
+            {
+                Emit(items, onItem, Item("제약", "중복 키", tm.IsSql ? "SQL " + tm.Source : tm.Source, CheckLevels.Pass,
+                    (tm.IsSql ? "원본 SQL 결과의 " : "원본 ") + string.Join(", ", keys) + " 중복 0건"
+                    + (tm.IsSql ? "(SQL을 감싼 GROUP BY 집계 — JOIN이 행을 늘리지 않음)" : "")
+                    + (string.Equals(tm.Mode, WriteModes.Merge, StringComparison.Ordinal) && t.Rows != null
+                        ? " · 대상 기존 " + Format.Number(t.Rows.Value) + "행은 갱신됨" : ""),
+                    Fix("tables", tm.Id), tm.Id, sample));
+                return;
+            }
+
+            var dupSql = ValidationSql.DuplicateKeys(tm, ctx.SourceMeta.Schema, MapKeyColumns(tm, keys), useSample, sqlCap);
+            var dupCount = 0;
+            try
+            {
+                var qr = await SafeQueryAsync(ctx.Source, ctx.SourceMeta.Schema, dupSql, ct).ConfigureAwait(false);
+                dupCount = qr != null && qr.Rows != null ? qr.Rows.Count : 0;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                dupCount = 0;
+            }
+
+            if (dupCount > 0)
+            {
+                Emit(items, onItem, Item("제약", "중복 키", tm.Target, CheckLevels.Error,
+                    "원본 병합 키 중복 " + dupCount.ToString(CultureInfo.InvariantCulture) + "건 — MERGE 시 ORA-30926",
+                    Fix("columns", tm.Id), tm.Id, sample));
+            }
+            else
+            {
+                var srcKey = s.IsVirtual
+                    ? string.Join(", ", keys.Select(k =>
+                    {
+                        var c = tm.FindColumn(k);
+                        return c != null ? c.Source : null;
+                    }).Where(x => !string.IsNullOrEmpty(x)))
+                    : string.Join(", ", s.Columns.Where(c => c.PrimaryKey).Select(c => c.Name));
+                if (string.IsNullOrEmpty(srcKey))
+                {
+                    srcKey = "키";
+                }
+
+                var passDetail = (s.IsVirtual ? "원본 SQL 결과의 " : "원본 ") + srcKey + " 중복 0건"
+                    + (s.IsVirtual ? "(SQL을 감싼 GROUP BY 집계 — JOIN이 행을 늘리지 않음)" : "")
+                    + (string.Equals(tm.Mode, WriteModes.Merge, StringComparison.Ordinal) && t.Rows != null
+                        ? " · 대상 기존 " + Format.Number(t.Rows.Value) + "행은 갱신됨" : "");
+                if (useSample)
+                {
+                    passDetail += " · 표본 5% 기준";
+                }
+
+                Emit(items, onItem, Item("제약", "중복 키", tm.IsSql ? "SQL " + tm.Source : tm.Source, CheckLevels.Pass,
+                    passDetail, null, tm.Id, useSample ? "표본 5%" : null));
+            }
+        }
+
+        private async Task EmitFksAsync(
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            MappingModel tm,
+            TableMetadata t,
+            List<MappingModel> used,
+            SchemaMetadata tgtMeta,
+            ValidationContext ctx,
+            SchemaMetadata srcMeta,
+            CancellationToken ct)
+        {
+            foreach (var fk in t.ForeignKeys ?? new List<ForeignKeyMetadata>())
+            {
+                var parent = used.FirstOrDefault(x => string.Equals(x.Target, fk.RefTable, StringComparison.OrdinalIgnoreCase));
+                var p = tgtMeta.FindTable(fk.RefTable);
+                var level = parent != null || (p != null && p.Rows != null && p.Rows.Value > 0)
+                    ? CheckLevels.Pass
+                    : CheckLevels.Warn;
+                var detail = fk.Name + " → " + fk.RefTable
+                    + (parent != null ? " · 부모 작업이 먼저 실행됨"
+                        : p != null && p.Rows != null && p.Rows.Value > 0
+                            ? " · 부모에 " + Format.Number(p.Rows.Value) + "행 있음"
+                            : " · 부모 테이블이 비어 있고 이번 작업에 없음");
+
+                if (level == CheckLevels.Warn && ctx.Source != null && parent == null)
+                {
+                    var parentSrc = FindParentSourceTable(used, fk.RefTable);
+                    if (parentSrc != null)
+                    {
+                        var orphanSql = ValidationSql.OrphanRows(
+                            srcMeta.Schema,
+                            tm.Source,
+                            fk.Columns,
+                            parentSrc,
+                            tgtMeta.FindTable(fk.RefTable)?.Columns.Where(c => c.PrimaryKey).Select(c => c.Name).ToList()
+                                ?? fk.Columns);
+                        var orphans = await SafeCountAsync(ctx.Source, srcMeta.Schema, orphanSql, ct).ConfigureAwait(false);
+                        if (orphans != null && orphans.Value > 0)
+                        {
+                            level = CheckLevels.Warn;
+                            detail += " · 고아 " + Format.Number(orphans.Value) + "행";
+                        }
+                    }
+                }
+
+                Emit(items, onItem, Item("제약", "참조 무결성(FK)", tm.Target + "." + string.Join(",", fk.Columns),
+                    level, detail, null, tm.Id));
+            }
+        }
+
+        private static string FindParentSourceTable(List<MappingModel> used, string targetParent)
+        {
+            var hit = used.FirstOrDefault(m => string.Equals(m.Target, targetParent, StringComparison.OrdinalIgnoreCase));
+            return hit != null ? hit.Source : null;
+        }
+
+        private static IList<string> MapKeyColumns(MappingModel tm, IList<string> targetKeys)
+        {
+            var list = new List<string>();
+            foreach (var k in targetKeys)
+            {
+                var cm = tm.FindColumn(k);
+                if (cm != null && !string.IsNullOrEmpty(cm.Source))
+                {
+                    list.Add(cm.Source);
+                }
+                else if (cm != null && !string.IsNullOrWhiteSpace(cm.Expr))
+                {
+                    list.Add(cm.Expr.Trim());
+                }
+                else
+                {
+                    list.Add(k);
+                }
+            }
+
+            return list;
+        }
+
+        private async Task RunPlanningAsync(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            List<MappingModel> used,
+            SchemaMetadata srcMeta,
+            SchemaMetadata tgtMeta,
+            CancellationToken ct)
+        {
+            var plan = PlannedMappings(used, tgtMeta);
+            double bytes = 0;
+            foreach (var p in plan)
+            {
+                var t = tgtMeta.FindTable(p.Target);
+                var s = SourceOf(p, srcMeta, ctx);
+                bytes += ((s != null && s.Rows != null) ? s.Rows.Value : 0) * ((t != null && t.AvgRowLength > 0) ? t.AvgRowLength : 100) * 1.35;
+            }
+
+            var ts = tgtMeta.Tablespace;
+            TablespaceInfo loaded = null;
+            if (ts == null && ctx.Target != null)
+            {
+                loaded = await TryLoadTablespaceAsync(ctx, ct).ConfigureAwait(false);
+                ts = loaded;
+            }
+
+            var needGb = bytes / 1024d / 1024d / 1024d;
+            if (ts == null)
+            {
+                Emit(items, onItem, Item("공간·실행", "대상 테이블스페이스", tgtMeta.Tablespace != null ? tgtMeta.Tablespace.Name : "—",
+                    CheckLevels.Info,
+                    "테이블스페이스 정보를 읽지 못했습니다 — 대상 계정 권한(USER_FREE_SPACE) 확인",
+                    null));
+            }
+            else
+            {
+                var freeGb = ts.FreeGb;
+                if (ts.QuotaLeftGb != null && ts.QuotaLeftGb.Value < freeGb)
+                {
+                    freeGb = ts.QuotaLeftGb.Value;
+                }
+
+                var tsLevel = needGb > freeGb ? CheckLevels.Error : needGb > freeGb * 0.7 ? CheckLevels.Warn : CheckLevels.Pass;
+                Emit(items, onItem, Item("공간·실행", "대상 테이블스페이스", ts.Name, tsLevel,
+                    "필요 약 " + needGb.ToString("0.00", CultureInfo.InvariantCulture)
+                    + " GB(행 × 평균 행 길이 × 1.35, 인덱스 포함) / 여유 " + freeGb.ToString(CultureInfo.InvariantCulture) + " GB",
+                    null));
+            }
+
+            var byTarget = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var p in plan)
+            {
+                if (!byTarget.TryGetValue(p.Target, out var labels))
+                {
+                    labels = new List<string>();
+                    byTarget[p.Target] = labels;
+                }
+
+                labels.Add(LabelOf(p));
+            }
+
+            foreach (var pair in byTarget.Where(x => x.Value.Count > 1))
+            {
+                Emit(items, onItem, Item("공간·실행", "같은 대상에 쓰는 작업", pair.Key, CheckLevels.Warn,
+                    string.Join("\n", pair.Value) + "\n나중 작업이 앞 작업의 값을 덮어씁니다 — 하나만 쓰세요", Fix("run")));
+            }
+
+            if (ctx.TargetProfile != null && string.Equals(ctx.TargetProfile.Color, "red", StringComparison.OrdinalIgnoreCase))
+            {
+                var risky = used.Where(m => WriteModes.Of(m.Mode).Destructive).ToList();
+                Emit(items, onItem, Item("공간·실행", "운영 DB 쓰기", ctx.TargetProfile.Name,
+                    risky.Count > 0 ? CheckLevels.Warn : CheckLevels.Info,
+                    risky.Count > 0
+                        ? string.Join("\n", risky.Select(m => m.Target + ": " + WriteModes.Of(m.Mode).Label + " — 되돌릴 수 없음, 실행 전에 한 번 더 묻습니다"))
+                        : "대상이 운영 DB(빨강)입니다",
+                    risky.Count > 0 ? Fix("tables") : null));
+            }
+
+            if (jobContinue(ctx))
+            {
+                var names = plan.Select(p => ErrorTableNamer.Resolve(ctx.Job.Strategy, p.Target))
+                    .Where(n => !string.IsNullOrEmpty(n)).Distinct(StringComparer.Ordinal).ToList();
+                var existsDetail = "없으면 실행 전에 만듭니다(DBMS_ERRLOG.CREATE_ERROR_LOG) · 거부 행은 RUN_ID와 함께 남음";
+                if (ctx.Target != null && names.Count > 0)
+                {
+                    foreach (var name in names)
+                    {
+                        var sql = ValidationSql.ErrorTableExists(ctx.TargetMeta.Schema, name);
+                        var qr = await SafeQueryAsync(ctx.Target, ctx.TargetMeta.Schema, sql, ct).ConfigureAwait(false);
+                        if (qr != null && qr.Rows != null && qr.Rows.Count == 0)
+                        {
+                            existsDetail = "없으면 실행 전에 만듭니다(DBMS_ERRLOG.CREATE_ERROR_LOG) · 거부 행은 RUN_ID와 함께 남음";
+                        }
+                    }
+                }
+
+                Emit(items, onItem, Item("공간·실행", "오류 테이블", string.Join(", ", names), CheckLevels.Info, existsDetail, null));
+            }
+
+            if (ctx.Job != null && ctx.Job.Checkpoints != null)
+            {
+                foreach (var pair in ctx.Job.Checkpoints)
+                {
+                    var tm = ctx.Job.Mappings.FirstOrDefault(m => string.Equals(m.Id, pair.Key, StringComparison.Ordinal));
+                    if (tm == null || string.Equals(pair.Value.Status, "done", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var cp = pair.Value;
+                    var cpVal = cp.Value;
+                    long cpNum;
+                    if (long.TryParse(cp.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out cpNum))
+                    {
+                        cpVal = Format.Number(cpNum);
+                    }
+
+                    Emit(items, onItem, Item("공간·실행", "체크포인트", LabelOf(tm), CheckLevels.Info,
+                        "지난 실행(" + cp.RunId + ")이 " + cp.Column + " = " + cpVal
+                        + "에서 멈춤 (" + cp.At + ") — 실행 화면의 [체크포인트에서 재개]로 이어서 할 수 있음",
+                        Fix("run", tm.Id), tm.Id));
+                }
+            }
+        }
+
+        private static bool jobContinue(ValidationContext ctx)
+        {
+            return ctx.Job != null && ctx.Job.Strategy != null
+                && string.Equals(ctx.Job.Strategy.ErrorPolicy, ErrorPolicies.Continue, StringComparison.Ordinal);
+        }
+
+        private async Task<TablespaceInfo> TryLoadTablespaceAsync(ValidationContext ctx, CancellationToken ct)
+        {
+            try
+            {
+                var sql = ValidationSql.TablespaceFree();
+                var qr = await SafeQueryAsync(ctx.Target, ctx.TargetMeta.Schema, sql, ct).ConfigureAwait(false);
+                if (qr == null || qr.Rows == null || qr.Rows.Count == 0)
+                {
+                    return null;
+                }
+
+                var row = qr.Rows[0];
+                var free = ParseDouble(Cell(qr, row, 1));
+                if (free == null)
+                {
+                    return null;
+                }
+
+                return new TablespaceInfo
+                {
+                    Name = Cell(qr, row, 0),
+                    FreeGb = free.Value,
+                    QuotaLeftGb = ParseDouble(Cell(qr, row, 2))
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string Cell(QueryResult qr, string[] row, int index)
+        {
+            return index < row.Length ? row[index] : "";
+        }
+
+        private static double? ParseDouble(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+            {
+                return null;
+            }
+
+            if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+            {
+                return v;
+            }
+
+            return null;
+        }
+
+        private async Task<QueryResult> SafeQueryAsync(ConnectionTarget target, string schema, string sql, CancellationToken ct)
+        {
+            try
+            {
+                OracleSelectGuard.EnsureSelectOnly(sql);
+                return await WithQueryTimeout(
+                    token => _adapter.QueryAsync(target, schema, sql, null, 1000, token),
+                    ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private async Task<long?> SafeCountAsync(ConnectionTarget target, string schema, string sql, CancellationToken ct)
+        {
+            try
+            {
+                OracleSelectGuard.EnsureSelectOnly(sql);
+                return await WithQueryTimeout(
+                    token => _adapter.CountAsync(target, schema, sql, null, token),
+                    ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static async Task<T> WithQueryTimeout<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct)
+        {
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                linked.CancelAfter(QueryTimeout);
+                try
+                {
+                    return await work(linked.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    if (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+
+                    throw new TimeoutException("질의 시간 초과(60초)");
+                }
+            }
+        }
+
+        private static TableMetadata SourceOf(MappingModel m, SchemaMetadata srcMeta, ValidationContext ctx)
+        {
+            if (m == null)
+            {
+                return null;
+            }
+
+            if (!m.IsSql)
+            {
+                return srcMeta != null ? srcMeta.FindTable(m.Source) : null;
+            }
+
+            IList<QueryColumn> described = null;
+            if (ctx.SqlDescribe != null && ctx.SqlDescribe.TryGetValue(m.Id, out var cols))
+            {
+                described = cols;
+            }
+
+            return SqlSourceService.VirtualTable(m, described != null ? described.ToList() : new List<QueryColumn>(), srcMeta);
+        }
+
+        private static string LabelOf(MappingModel m)
+        {
+            return (m.IsSql ? "SQL " : "") + m.Source + " → " + (m.Target ?? "?");
+        }
+
+        private static List<MappingModel> PlannedMappings(IList<MappingModel> used, SchemaMetadata tgtMeta)
+        {
+            var list = used.ToList();
+            var outList = new List<MappingModel>();
+            var done = new HashSet<string>(StringComparer.Ordinal);
+            var pending = list.ToList();
+            var guard = 0;
+            while (pending.Count > 0 && guard++ < 100)
+            {
+                var idx = pending.FindIndex(x =>
+                {
+                    var t = tgtMeta.FindTable(x.Target);
+                    var parents = (t != null ? t.ForeignKeys : null) ?? new List<ForeignKeyMetadata>();
+                    var refs = parents.Select(f => f.RefTable).Where(r => !string.Equals(r, x.Target, StringComparison.OrdinalIgnoreCase)).ToList();
+                    return refs.All(p => done.Contains(p) || !pending.Any(y => string.Equals(y.Target, p, StringComparison.OrdinalIgnoreCase)));
+                });
+                var next = pending[idx < 0 ? 0 : idx];
+                pending.RemoveAt(idx < 0 ? 0 : idx);
+                outList.Add(next);
+                done.Add(next.Target);
+            }
+
+            return outList;
+        }
+
+        private static string SampleTag(TableMetadata source, MappingModel tm)
+        {
+            if (tm.IsSql)
+            {
+                return "앞 100만 행";
+            }
+
+            if (source.Rows != null && source.Rows.Value > SampleRowThreshold)
+            {
+                return "표본 5%";
+            }
+
+            return null;
+        }
+
+        private static ValidationItem Item(
+            string group,
+            string check,
+            string target,
+            string level,
+            string detail,
+            FixAction fix,
+            string mappingId = null,
+            string sample = null)
+        {
+            return new ValidationItem
+            {
+                Group = group,
+                Check = check,
+                Target = target ?? "",
+                Level = level,
+                Detail = detail,
+                Fix = fix,
+                MappingId = mappingId,
+                Sample = sample
+            };
+        }
+
+        private static FixAction Fix(string page, string mappingId = null, string column = null)
+        {
+            return new FixAction { Page = page, MappingId = mappingId, Column = column };
+        }
+
+        private static void Emit(List<ValidationItem> items, Action<ValidationItem> onItem, ValidationItem item)
+        {
+            items.Add(item);
+            if (onItem != null)
+            {
+                onItem(item);
+            }
+        }
+    }
+}

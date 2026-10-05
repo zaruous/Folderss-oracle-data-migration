@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    화면과 무관한 이관 로직: 작업 모델·작업 파일, 매핑·형식 호환성, 식·SQL 분석, SQL 생성, 검증, 엔진, Oracle 어댑터.
+    플러그인(WPF)과 에이전트(MigrationAgent.exe)가 함께 쓰고, net8.0이라 Linux CI에서도 테스트한다.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>MigrationStudio.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MigrationStudio.Tests" />
+    <InternalsVisibleTo Include="MigrationStudio.OracleIT" />
+    <InternalsVisibleTo Include="AgentCli" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Core(net8.0) 단위 테스트. CI의 Ubuntu에서도 실행된다. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\MigrationStudio.Core\MigrationStudio.Core.csproj" />
+    <ProjectReference Include="..\..\src\MigrationStudio.Testing\MigrationStudio.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WPF 없는 화면 논리(플러그인의 Logic 폴더)를 이 프로젝트에서도 컴파일해 시험한다. System.Windows를 쓰면 안 된다. -->
+    <Compile Include="..\..\src\MigrationStudio\Logic\*.cs" Link="PluginLogic\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Golden\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

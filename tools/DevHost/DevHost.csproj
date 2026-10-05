@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    설계자 검수용 화면 도구: Folderss와 같은 테마·팝업 창에 플러그인을 띄우거나 PNG로 찍는다. 플러그인 zip에는 들어가지 않는다.
+    Folderss의 Themes\Controls.xaml이 AvalonDock 스타일을 참조하므로 같은 판을 참조해 그대로 읽는다.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>disable</Nullable>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <RootNamespace>DevHost</RootNamespace>
+    <AssemblyName>DevHost</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\contract\Folderss.PluginContract\Folderss.PluginContract.csproj" />
+    <ProjectReference Include="..\..\src\MigrationStudio\MigrationStudio.csproj" />
+    <ProjectReference Include="..\..\src\MigrationStudio.Testing\MigrationStudio.Testing.csproj" />
+    <PackageReference Include="Dirkster.AvalonDock" Version="4.74.1" />
+  </ItemGroup>
+
+</Project>

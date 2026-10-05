@@ -1,0 +1,4229 @@
+{
+  "note": "design/poc/js/backend 의 출력. C# Core 이식은 이 값과 같아야 한다(다르면 보고서에 이유를 적는다).",
+  "source": {
+    "schema": "LEGACY_APP",
+    "tables": [
+      {
+        "name": "SRC_CUSTOMER",
+        "kind": "TABLE",
+        "rows": 1240325,
+        "avgRowLength": 96,
+        "comment": "고객",
+        "columns": [
+          {
+            "name": "CUSTOMER_ID",
+            "type": "NUMBER(12)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "고객 번호",
+            "stats": {
+              "nulls": 0,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": 1240325,
+              "max": 1240325
+            }
+          },
+          {
+            "name": "CUSTOMER_NM",
+            "type": "VARCHAR2(100)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "고객명",
+            "stats": {
+              "nulls": 0,
+              "blanks": 37,
+              "maxLength": 42,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "PHONE_NO",
+            "type": "VARCHAR2(30)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "전화번호",
+            "stats": {
+              "nulls": 1204,
+              "blanks": null,
+              "maxLength": 18,
+              "digitsMaxLength": 13,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "STATUS_CD",
+            "type": "CHAR(1)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "상태(A 사용·I 휴면·D 탈퇴)",
+            "stats": {
+              "nulls": 0,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": 3,
+              "max": null
+            }
+          },
+          {
+            "name": "GRADE_CD",
+            "type": "VARCHAR2(2)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "등급 코드",
+            "stats": {
+              "nulls": 2210,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": 6,
+              "max": null
+            }
+          },
+          {
+            "name": "REG_DT",
+            "type": "DATE",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "등록일",
+            "stats": {
+              "nulls": 0,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "MOD_DT",
+            "type": "DATE",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "수정일",
+            "stats": {
+              "nulls": 182004,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "SRC_CUSTOMER_GRADE",
+        "kind": "TABLE",
+        "rows": 6,
+        "avgRowLength": 40,
+        "comment": "고객 등급",
+        "columns": [
+          {
+            "name": "GRADE_CD",
+            "type": "VARCHAR2(2)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "등급 코드",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "GRADE_NM",
+            "type": "VARCHAR2(50)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "등급 이름",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": 12,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "SORT_SEQ",
+            "type": "NUMBER(3)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "정렬 순서",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "SRC_ORDER",
+        "kind": "TABLE",
+        "rows": 8420117,
+        "avgRowLength": 74,
+        "comment": "주문",
+        "columns": [
+          {
+            "name": "ORDER_NO",
+            "type": "VARCHAR2(20)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "주문 번호",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": 17,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CUSTOMER_ID",
+            "type": "NUMBER(12)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "고객 번호",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "ORDER_DT",
+            "type": "DATE",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "주문 일시",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "ORDER_AMT",
+            "type": "NUMBER(15,2)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "주문 금액",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": 48200000
+            }
+          },
+          {
+            "name": "ORDER_STAT_CD",
+            "type": "VARCHAR2(2)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "주문 상태 코드",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "PAY_METHOD",
+            "type": "VARCHAR2(10)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "결제 수단",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "REG_DT",
+            "type": "DATE",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "등록일",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "SRC_ORDER_ITEM",
+        "kind": "TABLE",
+        "rows": 21904551,
+        "avgRowLength": 52,
+        "comment": "주문 품목",
+        "columns": [
+          {
+            "name": "ORDER_NO",
+            "type": "VARCHAR2(20)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "ITEM_SEQ",
+            "type": "NUMBER(4)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "PRODUCT_CD",
+            "type": "VARCHAR2(20)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "QTY",
+            "type": "NUMBER(7)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "UNIT_PRICE",
+            "type": "NUMBER(12,2)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "SRC_PRODUCT",
+        "kind": "TABLE",
+        "rows": 48210,
+        "avgRowLength": 120,
+        "comment": "상품",
+        "columns": [
+          {
+            "name": "PRODUCT_CD",
+            "type": "VARCHAR2(20)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "PRODUCT_NM",
+            "type": "VARCHAR2(200)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CATEGORY_CD",
+            "type": "VARCHAR2(10)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "PRICE",
+            "type": "NUMBER(12,2)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "USE_FLAG",
+            "type": "CHAR(1)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "SRC_CODE_MST",
+        "kind": "TABLE",
+        "rows": 1204,
+        "avgRowLength": 60,
+        "comment": "공통 코드",
+        "columns": [
+          {
+            "name": "CODE_GRP",
+            "type": "VARCHAR2(20)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CODE",
+            "type": "VARCHAR2(20)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CODE_NM",
+            "type": "VARCHAR2(100)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "V_CUSTOMER_SUMMARY",
+        "kind": "VIEW",
+        "rows": null,
+        "avgRowLength": 0,
+        "comment": "고객 요약 뷰",
+        "columns": [
+          {
+            "name": "CUSTOMER_ID",
+            "type": "NUMBER(12)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "ORDER_CNT",
+            "type": "NUMBER",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "TOTAL_AMT",
+            "type": "NUMBER",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "tablespace": null
+  },
+  "target": {
+    "schema": "NEXT_APP",
+    "tables": [
+      {
+        "name": "TB_MEMBER",
+        "kind": "TABLE",
+        "rows": 58225,
+        "avgRowLength": 110,
+        "comment": "회원(시범 이관분 58,225건 있음)",
+        "columns": [
+          {
+            "name": "MEMBER_ID",
+            "type": "NUMBER(18)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "회원 ID",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "MEMBER_NAME",
+            "type": "VARCHAR2(150)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "회원 이름",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "MOBILE_NO",
+            "type": "VARCHAR2(20)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "휴대폰 번호(숫자만)",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "USE_YN",
+            "type": "CHAR(1)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": "'Y'",
+            "comment": "사용 여부",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "MEMBER_GRADE",
+            "type": "VARCHAR2(50)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "등급 이름",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CREATED_AT",
+            "type": "TIMESTAMP",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "생성 일시",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "UPDATED_AT",
+            "type": "TIMESTAMP",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "수정 일시",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "TB_MEMBER_GRADE",
+        "kind": "TABLE",
+        "rows": 0,
+        "avgRowLength": 48,
+        "comment": "회원 등급",
+        "columns": [
+          {
+            "name": "GRADE_CODE",
+            "type": "VARCHAR2(10)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "GRADE_NAME",
+            "type": "VARCHAR2(100)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "DISPLAY_ORDER",
+            "type": "NUMBER(5)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "TB_SALES_ORDER",
+        "kind": "TABLE",
+        "rows": 0,
+        "avgRowLength": 90,
+        "comment": "판매 주문",
+        "columns": [
+          {
+            "name": "ORDER_NO",
+            "type": "VARCHAR2(30)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "MEMBER_ID",
+            "type": "NUMBER(18)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "ORDERED_AT",
+            "type": "TIMESTAMP",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "TOTAL_AMT",
+            "type": "NUMBER(13,2)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "ORDER_STATUS",
+            "type": "VARCHAR2(10)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CHANNEL_CD",
+            "type": "VARCHAR2(10)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "판매 채널(신규 컬럼)",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CREATED_AT",
+            "type": "TIMESTAMP",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": [
+          {
+            "name": "FK_SALES_ORDER_MEMBER",
+            "columns": [
+              "MEMBER_ID"
+            ],
+            "refTable": "TB_MEMBER"
+          }
+        ]
+      },
+      {
+        "name": "TB_SALES_ORDER_ITEM",
+        "kind": "TABLE",
+        "rows": 0,
+        "avgRowLength": 60,
+        "comment": "판매 주문 품목",
+        "columns": [
+          {
+            "name": "ORDER_NO",
+            "type": "VARCHAR2(30)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "LINE_NO",
+            "type": "NUMBER(5)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "PRODUCT_ID",
+            "type": "VARCHAR2(30)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "QUANTITY",
+            "type": "NUMBER(9)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "UNIT_PRICE",
+            "type": "NUMBER(14,2)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": [
+          {
+            "name": "FK_ORDER_ITEM_ORDER",
+            "columns": [
+              "ORDER_NO"
+            ],
+            "refTable": "TB_SALES_ORDER"
+          },
+          {
+            "name": "FK_ORDER_ITEM_PRODUCT",
+            "columns": [
+              "PRODUCT_ID"
+            ],
+            "refTable": "TB_PRODUCT"
+          }
+        ]
+      },
+      {
+        "name": "TB_PRODUCT",
+        "kind": "TABLE",
+        "rows": 0,
+        "avgRowLength": 140,
+        "comment": "상품",
+        "columns": [
+          {
+            "name": "PRODUCT_ID",
+            "type": "VARCHAR2(30)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "PRODUCT_NAME",
+            "type": "VARCHAR2(300)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CATEGORY_ID",
+            "type": "VARCHAR2(20)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "LIST_PRICE",
+            "type": "NUMBER(14,2)",
+            "nullable": true,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "USE_YN",
+            "type": "CHAR(1)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": "'Y'",
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "name": "TB_COMMON_CODE",
+        "kind": "TABLE",
+        "rows": 0,
+        "avgRowLength": 70,
+        "comment": "공통 코드",
+        "columns": [
+          {
+            "name": "GROUP_CODE",
+            "type": "VARCHAR2(30)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CODE",
+            "type": "VARCHAR2(30)",
+            "nullable": false,
+            "primaryKey": true,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          },
+          {
+            "name": "CODE_NAME",
+            "type": "VARCHAR2(200)",
+            "nullable": false,
+            "primaryKey": false,
+            "defaultValue": null,
+            "comment": "",
+            "stats": {
+              "nulls": null,
+              "blanks": null,
+              "maxLength": null,
+              "digitsMaxLength": null,
+              "distinct": null,
+              "max": null
+            }
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "tablespace": {
+      "name": "NEXT_DATA",
+      "freeGb": 182.4
+    }
+  },
+  "types": [
+    {
+      "input": "VARCHAR2(30)",
+      "base": "VARCHAR2",
+      "length": 30,
+      "precision": null,
+      "scale": null,
+      "isChar": true,
+      "isDate": false
+    },
+    {
+      "input": "NUMBER(15,2)",
+      "base": "NUMBER",
+      "length": null,
+      "precision": 15,
+      "scale": 2,
+      "isChar": false,
+      "isDate": false
+    },
+    {
+      "input": "NUMBER(12)",
+      "base": "NUMBER",
+      "length": null,
+      "precision": 12,
+      "scale": 0,
+      "isChar": false,
+      "isDate": false
+    },
+    {
+      "input": "NUMBER",
+      "base": "NUMBER",
+      "length": null,
+      "precision": null,
+      "scale": null,
+      "isChar": false,
+      "isDate": false
+    },
+    {
+      "input": "CHAR(1)",
+      "base": "CHAR",
+      "length": 1,
+      "precision": null,
+      "scale": null,
+      "isChar": true,
+      "isDate": false
+    },
+    {
+      "input": "DATE",
+      "base": "DATE",
+      "length": null,
+      "precision": null,
+      "scale": null,
+      "isChar": false,
+      "isDate": true
+    },
+    {
+      "input": "TIMESTAMP",
+      "base": "TIMESTAMP",
+      "length": null,
+      "precision": null,
+      "scale": null,
+      "isChar": false,
+      "isDate": true
+    },
+    {
+      "input": "TIMESTAMP(3)",
+      "base": "TIMESTAMP",
+      "length": null,
+      "precision": null,
+      "scale": null,
+      "isChar": false,
+      "isDate": true
+    },
+    {
+      "input": "VARCHAR2(100 CHAR)",
+      "base": "VARCHAR2(100 CHAR)",
+      "length": null,
+      "precision": null,
+      "scale": null,
+      "isChar": false,
+      "isDate": false
+    },
+    {
+      "input": "CLOB",
+      "base": "CLOB",
+      "length": null,
+      "precision": null,
+      "scale": null,
+      "isChar": false,
+      "isDate": false
+    }
+  ],
+  "compat": [
+    {
+      "source": "VARCHAR2(30)",
+      "target": "VARCHAR2(20)",
+      "stats": {
+        "maxLength": 13,
+        "max": null
+      },
+      "result": {
+        "level": "WARN",
+        "kind": "truncate",
+        "msg": "VARCHAR2(30) → VARCHAR2(20) 잘림 위험 · 실측 최대 13자라 지금 데이터는 들어감"
+      }
+    },
+    {
+      "source": "VARCHAR2(30)",
+      "target": "VARCHAR2(20)",
+      "stats": {
+        "maxLength": 25,
+        "max": null
+      },
+      "result": {
+        "level": "WARN",
+        "kind": "truncate",
+        "msg": "VARCHAR2(30) → VARCHAR2(20) 잘림 위험 · 실측 최대 25자(ORA-12899)"
+      }
+    },
+    {
+      "source": "VARCHAR2(30)",
+      "target": "VARCHAR2(20)",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "kind": "truncate",
+        "msg": "VARCHAR2(30) → VARCHAR2(20) 잘림 위험"
+      }
+    },
+    {
+      "source": "VARCHAR2(100)",
+      "target": "VARCHAR2(150)",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "호환"
+      }
+    },
+    {
+      "source": "VARCHAR2(10)",
+      "target": "CHAR(10)",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "VARCHAR2 → CHAR: 뒤를 공백으로 채움"
+      }
+    },
+    {
+      "source": "NUMBER(12)",
+      "target": "NUMBER(18)",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "호환(정밀도 넓어짐)"
+      }
+    },
+    {
+      "source": "NUMBER(12)",
+      "target": "NUMBER(12)",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "호환"
+      }
+    },
+    {
+      "source": "NUMBER(15,2)",
+      "target": "NUMBER(13,2)",
+      "stats": {
+        "maxLength": null,
+        "max": 48200000
+      },
+      "result": {
+        "level": "WARN",
+        "kind": "precision",
+        "msg": "정수부 13자리 → 11자리 · 실측 최대 48,200,000이라 지금 데이터는 들어감"
+      }
+    },
+    {
+      "source": "NUMBER(15,2)",
+      "target": "NUMBER(13,2)",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "kind": "precision",
+        "msg": "정수부 13자리 → 11자리 · ORA-01438 위험"
+      }
+    },
+    {
+      "source": "NUMBER(15,4)",
+      "target": "NUMBER(17,2)",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "kind": "precision",
+        "msg": "소수부 4자리 → 2자리로 반올림"
+      }
+    },
+    {
+      "source": "NUMBER",
+      "target": "NUMBER(10)",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "kind": "precision",
+        "msg": "원본 NUMBER 정밀도 미지정 → NUMBER(10) 넘칠 수 있음(ORA-01438)"
+      }
+    },
+    {
+      "source": "NUMBER(10)",
+      "target": "NUMBER",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "호환(대상 정밀도 제한 없음)"
+      }
+    },
+    {
+      "source": "DATE",
+      "target": "TIMESTAMP",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "DATE → TIMESTAMP 암시 변환"
+      }
+    },
+    {
+      "source": "TIMESTAMP",
+      "target": "DATE",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "msg": "TIMESTAMP → DATE: 소수 초가 사라짐"
+      }
+    },
+    {
+      "source": "DATE",
+      "target": "DATE",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "호환"
+      }
+    },
+    {
+      "source": "NUMBER(12)",
+      "target": "VARCHAR2(5)",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "msg": "숫자 → 문자: 13자 필요, 대상 5자"
+      }
+    },
+    {
+      "source": "NUMBER(12)",
+      "target": "VARCHAR2(20)",
+      "stats": null,
+      "result": {
+        "level": "PASS",
+        "msg": "숫자 → 문자 암시 변환"
+      }
+    },
+    {
+      "source": "VARCHAR2(10)",
+      "target": "NUMBER(10)",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "msg": "문자 → 숫자: 숫자가 아닌 값은 ORA-01722로 거부됨"
+      }
+    },
+    {
+      "source": "VARCHAR2(10)",
+      "target": "DATE",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "msg": "문자 → 날짜: TO_DATE(값, 형식)을 쓰세요(NLS에 따라 달라짐)"
+      }
+    },
+    {
+      "source": "DATE",
+      "target": "VARCHAR2(30)",
+      "stats": null,
+      "result": {
+        "level": "WARN",
+        "msg": "날짜 → 문자: TO_CHAR(값, 형식)을 쓰세요(NLS에 따라 달라짐)"
+      }
+    },
+    {
+      "source": "DATE",
+      "target": "NUMBER(10)",
+      "stats": null,
+      "result": {
+        "level": "ERROR",
+        "msg": "DATE → NUMBER(10) 형식이 호환되지 않음(ORA-00932)"
+      }
+    },
+    {
+      "source": null,
+      "target": "VARCHAR2(10)",
+      "stats": null,
+      "result": {
+        "level": "INFO",
+        "msg": "결과 형식을 추정하지 못했습니다 — 실행 전 DESCRIBE로 다시 확인"
+      }
+    },
+    {
+      "source": "VARCHAR2(10)",
+      "target": null,
+      "stats": null,
+      "result": {
+        "level": "ERROR",
+        "msg": "대상 형식을 알 수 없습니다"
+      }
+    }
+  ],
+  "expressions": [
+    {
+      "expr": "CUSTOMER_ID",
+      "error": null,
+      "refs": [
+        "CUSTOMER_ID"
+      ],
+      "binds": [],
+      "type": "NUMBER(12)"
+    },
+    {
+      "expr": "TRIM(CUSTOMER_NM)",
+      "error": null,
+      "refs": [
+        "CUSTOMER_NM"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(100)"
+    },
+    {
+      "expr": "REGEXP_REPLACE(PHONE_NO, '[^0-9]', '')",
+      "error": null,
+      "refs": [
+        "PHONE_NO"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(30)"
+    },
+    {
+      "expr": "CASE\n    WHEN STATUS_CD = 'A' THEN 'Y'\n    ELSE 'N'\nEND",
+      "error": null,
+      "refs": [
+        "STATUS_CD"
+      ],
+      "binds": [],
+      "type": "CHAR(1)"
+    },
+    {
+      "expr": "CAST(REG_DT AS TIMESTAMP)",
+      "error": null,
+      "refs": [
+        "REG_DT"
+      ],
+      "binds": [],
+      "type": "TIMESTAMP"
+    },
+    {
+      "expr": "CAST(NVL(MOD_DT, REG_DT) AS TIMESTAMP)",
+      "error": null,
+      "refs": [
+        "MOD_DT",
+        "REG_DT"
+      ],
+      "binds": [],
+      "type": "TIMESTAMP"
+    },
+    {
+      "expr": "NVL(MOD_DT, REG_DT)",
+      "error": null,
+      "refs": [
+        "MOD_DT",
+        "REG_DT"
+      ],
+      "binds": [],
+      "type": "DATE"
+    },
+    {
+      "expr": "DECODE(ORDER_STAT_CD, '10', 'ORDERED', '20', 'PAID', '30', 'SHIPPED', '90', 'CANCELED', 'UNKNOWN')",
+      "error": null,
+      "refs": [
+        "ORDER_STAT_CD"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(8)"
+    },
+    {
+      "expr": "SUBSTR(CUSTOMER_NM, 1, 20)",
+      "error": null,
+      "refs": [
+        "CUSTOMER_NM"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(20)"
+    },
+    {
+      "expr": "CUSTOMER_NM || '-' || PHONE_NO",
+      "error": null,
+      "refs": [
+        "CUSTOMER_NM",
+        "PHONE_NO"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(131)"
+    },
+    {
+      "expr": "ORDER_AMT * 1.1",
+      "error": null,
+      "refs": [
+        "ORDER_AMT"
+      ],
+      "binds": [],
+      "type": "NUMBER"
+    },
+    {
+      "expr": "REG_DT + 1",
+      "error": null,
+      "refs": [
+        "REG_DT"
+      ],
+      "binds": [],
+      "type": "DATE"
+    },
+    {
+      "expr": "SYSDATE",
+      "error": null,
+      "refs": [],
+      "binds": [],
+      "type": "DATE"
+    },
+    {
+      "expr": "SYSTIMESTAMP",
+      "error": null,
+      "refs": [],
+      "binds": [],
+      "type": "TIMESTAMP"
+    },
+    {
+      "expr": "TO_CHAR(REG_DT, 'YYYYMMDD')",
+      "error": null,
+      "refs": [
+        "REG_DT"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(26)"
+    },
+    {
+      "expr": "TO_DATE('20240101', 'YYYYMMDD')",
+      "error": null,
+      "refs": [],
+      "binds": [],
+      "type": "DATE"
+    },
+    {
+      "expr": "LPAD(CUSTOMER_ID, 10, '0')",
+      "error": null,
+      "refs": [
+        "CUSTOMER_ID"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(10)"
+    },
+    {
+      "expr": "UPPER(C.CUSTOMER_NM)",
+      "error": null,
+      "refs": [
+        "C.CUSTOMER_NM"
+      ],
+      "binds": [],
+      "type": "VARCHAR2(100)"
+    },
+    {
+      "expr": "C.CUSTOMER_ID > :LAST_ID AND C.STATUS_CD IN ('A', 'I')",
+      "error": null,
+      "refs": [
+        "C.CUSTOMER_ID",
+        "C.STATUS_CD"
+      ],
+      "binds": [
+        "LAST_ID"
+      ],
+      "type": null
+    },
+    {
+      "expr": "CASE STATUS_CD WHEN 'A' THEN 1 WHEN 'I' THEN 2 ELSE 0 END",
+      "error": null,
+      "refs": [
+        "STATUS_CD"
+      ],
+      "binds": [],
+      "type": "NUMBER"
+    },
+    {
+      "expr": "CUSTOMER_NM IS NOT NULL",
+      "error": null,
+      "refs": [
+        "CUSTOMER_NM"
+      ],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "CUSTOMER_NM LIKE '김%'",
+      "error": null,
+      "refs": [
+        "CUSTOMER_NM"
+      ],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "CUSTOMER_ID BETWEEN 1 AND 10",
+      "error": null,
+      "refs": [
+        "CUSTOMER_ID"
+      ],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "NOT (CUSTOMER_ID = 1)",
+      "error": null,
+      "refs": [
+        "CUSTOMER_ID"
+      ],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "-CUSTOMER_ID",
+      "error": null,
+      "refs": [
+        "CUSTOMER_ID"
+      ],
+      "binds": [],
+      "type": "NUMBER"
+    },
+    {
+      "expr": "COUNT(*)",
+      "error": null,
+      "refs": [],
+      "binds": [],
+      "type": "NUMBER"
+    },
+    {
+      "expr": "MAX(REG_DT)",
+      "error": null,
+      "refs": [
+        "REG_DT"
+      ],
+      "binds": [],
+      "type": "DATE"
+    },
+    {
+      "expr": "TRIM(",
+      "error": {
+        "code": "ORA-00936",
+        "message": "ORA-00936: 식이 없습니다 (식 끝)",
+        "position": 5
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "FOO(1)",
+      "error": null,
+      "refs": [],
+      "binds": [],
+      "type": "NUMBER"
+    },
+    {
+      "expr": "'abc",
+      "error": {
+        "code": "ORA-01756",
+        "message": "ORA-01756: 인용부호가 올바르게 끝나지 않았습니다",
+        "position": 0
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "CUSTOMER_ID +",
+      "error": {
+        "code": "ORA-00936",
+        "message": "ORA-00936: 식이 없습니다 (식 끝)",
+        "position": 13
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "(CUSTOMER_ID",
+      "error": {
+        "code": "ORA-00907",
+        "message": "ORA-00907: 오른쪽 괄호가 없습니다 (식 끝)",
+        "position": 12
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "CAST(REG_DT TIMESTAMP)",
+      "error": {
+        "code": "ORA-00905",
+        "message": "ORA-00905: 키워드가 없습니다: AS ('TIMESTAMP' 근처)",
+        "position": 12
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "CASE WHEN 1 = 1 THEN 1",
+      "error": {
+        "code": "ORA-00905",
+        "message": "ORA-00905: 키워드가 없습니다: END (식 끝)",
+        "position": 22
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "SELECT",
+      "error": {
+        "code": "ORA-00936",
+        "message": "ORA-00936: 식이 없습니다 ('SELECT' 근처)",
+        "position": 0
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "",
+      "error": {
+        "code": "ORA-00936",
+        "message": "ORA-00936: 식이 없습니다",
+        "position": 0
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    },
+    {
+      "expr": "A B",
+      "error": {
+        "code": "ORA-00933",
+        "message": "ORA-00933: SQL 명령어가 올바르게 종료되지 않았습니다 ('B' 근처)",
+        "position": 2
+      },
+      "refs": [],
+      "binds": [],
+      "type": null
+    }
+  ],
+  "autoMatchTables": [
+    {
+      "source": "SRC_ORDER_ITEM",
+      "target": "TB_SALES_ORDER_ITEM",
+      "reason": "용어 사전(ORDER_ITEM → SALES_ORDER_ITEM)"
+    },
+    {
+      "source": "SRC_PRODUCT",
+      "target": "TB_PRODUCT",
+      "reason": "이름 규칙(접두어 제외 같음)"
+    },
+    {
+      "source": "SRC_CODE_MST",
+      "target": "TB_COMMON_CODE",
+      "reason": "용어 사전(CODE_MST → COMMON_CODE)"
+    }
+  ],
+  "autoMapColumns": [
+    {
+      "source": "SRC_CUSTOMER",
+      "target": "TB_MEMBER",
+      "columns": [
+        {
+          "target": "MEMBER_ID",
+          "source": "CUSTOMER_ID",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "MEMBER_NAME",
+          "source": "CUSTOMER_NM",
+          "expr": "TRIM(CUSTOMER_NM)",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "MOBILE_NO",
+          "source": "PHONE_NO",
+          "expr": "REGEXP_REPLACE(PHONE_NO, '[^0-9]', '')",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "USE_YN",
+          "source": "STATUS_CD",
+          "expr": "CASE\n    WHEN STATUS_CD = 'A' THEN 'Y'\n    ELSE 'N'\nEND",
+          "nullRule": "DEFAULT",
+          "defaultValue": "Y",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "MEMBER_GRADE",
+          "source": null,
+          "expr": "",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": null
+        },
+        {
+          "target": "CREATED_AT",
+          "source": "REG_DT",
+          "expr": "CAST(REG_DT AS TIMESTAMP)",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "UPDATED_AT",
+          "source": "MOD_DT",
+          "expr": "CAST(MOD_DT AS TIMESTAMP)",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        }
+      ]
+    },
+    {
+      "source": "SRC_ORDER",
+      "target": "TB_SALES_ORDER",
+      "columns": [
+        {
+          "target": "ORDER_NO",
+          "source": "ORDER_NO",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "같은 이름"
+        },
+        {
+          "target": "MEMBER_ID",
+          "source": "CUSTOMER_ID",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "ORDERED_AT",
+          "source": "ORDER_DT",
+          "expr": "CAST(ORDER_DT AS TIMESTAMP)",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "TOTAL_AMT",
+          "source": "ORDER_AMT",
+          "expr": "",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "ORDER_STATUS",
+          "source": "ORDER_STAT_CD",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "CHANNEL_CD",
+          "source": null,
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": null
+        },
+        {
+          "target": "CREATED_AT",
+          "source": "REG_DT",
+          "expr": "CAST(REG_DT AS TIMESTAMP)",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        }
+      ]
+    },
+    {
+      "source": "SRC_CUSTOMER_GRADE",
+      "target": "TB_MEMBER_GRADE",
+      "columns": [
+        {
+          "target": "GRADE_CODE",
+          "source": "GRADE_CD",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "GRADE_NAME",
+          "source": "GRADE_NM",
+          "expr": "TRIM(GRADE_NM)",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "DISPLAY_ORDER",
+          "source": "SORT_SEQ",
+          "expr": "",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        }
+      ]
+    },
+    {
+      "source": "SRC_PRODUCT",
+      "target": "TB_PRODUCT",
+      "columns": [
+        {
+          "target": "PRODUCT_ID",
+          "source": "PRODUCT_CD",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "PRODUCT_NAME",
+          "source": "PRODUCT_NM",
+          "expr": "TRIM(PRODUCT_NM)",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "CATEGORY_ID",
+          "source": "CATEGORY_CD",
+          "expr": "",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "LIST_PRICE",
+          "source": "PRICE",
+          "expr": "",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "USE_YN",
+          "source": "USE_FLAG",
+          "expr": "",
+          "nullRule": "DEFAULT",
+          "defaultValue": "Y",
+          "reason": "용어 사전"
+        }
+      ]
+    },
+    {
+      "source": "SRC_ORDER_ITEM",
+      "target": "TB_SALES_ORDER_ITEM",
+      "columns": [
+        {
+          "target": "ORDER_NO",
+          "source": "ORDER_NO",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "같은 이름"
+        },
+        {
+          "target": "LINE_NO",
+          "source": "ITEM_SEQ",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "PRODUCT_ID",
+          "source": "PRODUCT_CD",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "QUANTITY",
+          "source": "QTY",
+          "expr": "",
+          "nullRule": "REJECT",
+          "defaultValue": "",
+          "reason": "용어 사전"
+        },
+        {
+          "target": "UNIT_PRICE",
+          "source": "UNIT_PRICE",
+          "expr": "",
+          "nullRule": "ALLOW",
+          "defaultValue": "",
+          "reason": "같은 이름"
+        }
+      ]
+    }
+  ],
+  "sampleJob": {
+    "format": "folderss-migration-job",
+    "version": 2,
+    "jobName": "CUSTOMER_MIGRATION",
+    "description": "레거시 고객·주문 데이터를 NEXT_APP 스키마로 이관",
+    "source": {
+      "profileId": "cn-legacy-prod",
+      "schema": "LEGACY_APP",
+      "name": "LEGACY_PROD",
+      "kind": "oracle",
+      "host": "10.10.10.21",
+      "port": "1521",
+      "service": "LEGACY",
+      "user": "LEGACY_APP"
+    },
+    "target": {
+      "profileId": "cn-next-prod",
+      "schema": "NEXT_APP",
+      "name": "NEXT_PROD",
+      "kind": "oracle",
+      "host": "10.20.10.35",
+      "port": "1521",
+      "service": "NEXTDB",
+      "user": "NEXT_APP"
+    },
+    "strategy": {
+      "mode": "FULL",
+      "incrementalBy": "PK",
+      "commitSize": 10000,
+      "fetchSize": 5000,
+      "errorPolicy": "CONTINUE",
+      "errorTable": "ERR$_",
+      "workers": 4
+    },
+    "mappings": [
+      {
+        "id": "tm-customer",
+        "use": true,
+        "sourceType": "TABLE",
+        "source": "SRC_CUSTOMER",
+        "target": "TB_MEMBER",
+        "mode": "MERGE",
+        "mergeKey": [
+          "MEMBER_ID"
+        ],
+        "checkpointColumn": "CUSTOMER_ID",
+        "where": "",
+        "columns": [
+          {
+            "target": "MEMBER_ID",
+            "source": "CUSTOMER_ID",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "MEMBER_NAME",
+            "source": "CUSTOMER_NM",
+            "expr": "TRIM(CUSTOMER_NM)",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "MOBILE_NO",
+            "source": "PHONE_NO",
+            "expr": "REGEXP_REPLACE(PHONE_NO, '[^0-9]', '')",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          },
+          {
+            "target": "USE_YN",
+            "source": "STATUS_CD",
+            "expr": "CASE\n    WHEN STATUS_CD = 'A' THEN 'Y'\n    ELSE 'N'\nEND",
+            "nullRule": "DEFAULT",
+            "defaultValue": "Y"
+          },
+          {
+            "target": "MEMBER_GRADE",
+            "source": null,
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          },
+          {
+            "target": "CREATED_AT",
+            "source": "REG_DT",
+            "expr": "CAST(REG_DT AS TIMESTAMP)",
+            "nullRule": "SYSDATE",
+            "defaultValue": ""
+          },
+          {
+            "target": "UPDATED_AT",
+            "source": "MOD_DT",
+            "expr": "CAST(NVL(MOD_DT, REG_DT) AS TIMESTAMP)",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          }
+        ]
+      },
+      {
+        "id": "tm-order",
+        "use": true,
+        "sourceType": "TABLE",
+        "source": "SRC_ORDER",
+        "target": "TB_SALES_ORDER",
+        "mode": "INSERT_ONLY",
+        "mergeKey": [
+          "ORDER_NO"
+        ],
+        "checkpointColumn": "ORDER_NO",
+        "where": "ORDER_STAT_CD <> '00'",
+        "columns": [
+          {
+            "target": "ORDER_NO",
+            "source": "ORDER_NO",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "MEMBER_ID",
+            "source": "CUSTOMER_ID",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "ORDERED_AT",
+            "source": "ORDER_DT",
+            "expr": "CAST(ORDER_DT AS TIMESTAMP)",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "TOTAL_AMT",
+            "source": "ORDER_AMT",
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          },
+          {
+            "target": "ORDER_STATUS",
+            "source": "ORDER_STAT_CD",
+            "expr": "DECODE(ORDER_STAT_CD,\n       '10', 'ORDERED',\n       '20', 'PAID',\n       '30', 'SHIPPED',\n       '90', 'CANCELED',\n       'UNKNOWN')",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "CHANNEL_CD",
+            "source": null,
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "CREATED_AT",
+            "source": "REG_DT",
+            "expr": "CAST(REG_DT AS TIMESTAMP)",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          }
+        ]
+      },
+      {
+        "id": "tm-grade",
+        "use": true,
+        "sourceType": "TABLE",
+        "source": "SRC_CUSTOMER_GRADE",
+        "target": "TB_MEMBER_GRADE",
+        "mode": "TRUNCATE_INSERT",
+        "mergeKey": [
+          "GRADE_CODE"
+        ],
+        "checkpointColumn": null,
+        "where": "",
+        "columns": [
+          {
+            "target": "GRADE_CODE",
+            "source": "GRADE_CD",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "GRADE_NAME",
+            "source": "GRADE_NM",
+            "expr": "TRIM(GRADE_NM)",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "DISPLAY_ORDER",
+            "source": "SORT_SEQ",
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          }
+        ]
+      },
+      {
+        "id": "tm-sql-member",
+        "use": false,
+        "sourceType": "SQL",
+        "source": "SQLMAP_MEMBER",
+        "sql": "SELECT\n    C.CUSTOMER_ID AS MEMBER_ID,\n\n    TRIM(C.CUSTOMER_NM)\n        AS MEMBER_NAME,\n\n    REGEXP_REPLACE(\n        C.PHONE_NO,\n        '[^0-9]',\n        ''\n    ) AS MOBILE_NO,\n\n    CASE\n        WHEN C.STATUS_CD = 'A'\n        THEN 'Y'\n        ELSE 'N'\n    END AS USE_YN,\n\n    G.GRADE_NM AS MEMBER_GRADE,\n\n    CAST(\n        C.REG_DT AS TIMESTAMP\n    ) AS CREATED_AT,\n\n    CAST(\n        NVL(C.MOD_DT, C.REG_DT)\n        AS TIMESTAMP\n    ) AS UPDATED_AT\n\nFROM SRC_CUSTOMER C\n\nLEFT JOIN SRC_CUSTOMER_GRADE G\n       ON G.GRADE_CD = C.GRADE_CD\n\nWHERE C.CUSTOMER_ID > :LAST_ID",
+        "binds": [
+          {
+            "name": "LAST_ID",
+            "type": "NUMBER",
+            "value": "850000",
+            "fromCheckpoint": true
+          }
+        ],
+        "target": "TB_MEMBER",
+        "mode": "MERGE",
+        "mergeKey": [
+          "MEMBER_ID"
+        ],
+        "checkpointColumn": "MEMBER_ID",
+        "where": "",
+        "fetchSize": 5000,
+        "commitSize": 10000,
+        "columns": [
+          {
+            "target": "MEMBER_ID",
+            "source": "MEMBER_ID",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "MEMBER_NAME",
+            "source": "MEMBER_NAME",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          },
+          {
+            "target": "MOBILE_NO",
+            "source": "MOBILE_NO",
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          },
+          {
+            "target": "USE_YN",
+            "source": "USE_YN",
+            "expr": "",
+            "nullRule": "DEFAULT",
+            "defaultValue": "Y"
+          },
+          {
+            "target": "MEMBER_GRADE",
+            "source": "MEMBER_GRADE",
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          },
+          {
+            "target": "CREATED_AT",
+            "source": "CREATED_AT",
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          },
+          {
+            "target": "UPDATED_AT",
+            "source": "UPDATED_AT",
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          }
+        ]
+      }
+    ],
+    "checkpoints": {
+      "tm-customer": {
+        "column": "CUSTOMER_ID",
+        "value": 850000,
+        "rows": 850000,
+        "total": 1240325,
+        "at": "2026-10-02 23:41:07",
+        "runId": "R-20261002-234107",
+        "status": "stopped"
+      }
+    }
+  },
+  "mappingStatus": [
+    {
+      "mapping": "tm-customer",
+      "mapped": 6,
+      "total": 7,
+      "level": "WARN",
+      "errors": 0,
+      "warns": 2,
+      "columns": [
+        {
+          "target": "MEMBER_ID",
+          "level": "PASS",
+          "type": "NUMBER(12)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환(정밀도 넓어짐)"
+            }
+          ]
+        },
+        {
+          "target": "MEMBER_NAME",
+          "level": "WARN",
+          "type": "VARCHAR2(100)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            },
+            {
+              "level": "WARN",
+              "msg": "NULL 37행은 거부되어 오류 테이블로 감"
+            }
+          ]
+        },
+        {
+          "target": "MOBILE_NO",
+          "level": "WARN",
+          "type": "VARCHAR2(30)",
+          "msgs": [
+            {
+              "level": "WARN",
+              "msg": "VARCHAR2(30) → VARCHAR2(20) 잘림 위험 · 실측 최대 13자라 지금 데이터는 들어감"
+            }
+          ]
+        },
+        {
+          "target": "USE_YN",
+          "level": "PASS",
+          "type": "CHAR(1)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        },
+        {
+          "target": "MEMBER_GRADE",
+          "level": "INFO",
+          "type": null,
+          "msgs": [
+            {
+              "level": "INFO",
+              "msg": "매핑 안 함 — NULL로 둠"
+            }
+          ]
+        },
+        {
+          "target": "CREATED_AT",
+          "level": "PASS",
+          "type": "TIMESTAMP",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        },
+        {
+          "target": "UPDATED_AT",
+          "level": "PASS",
+          "type": "TIMESTAMP",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "mapping": "tm-order",
+      "mapped": 6,
+      "total": 7,
+      "level": "ERROR",
+      "errors": 1,
+      "warns": 1,
+      "columns": [
+        {
+          "target": "ORDER_NO",
+          "level": "PASS",
+          "type": "VARCHAR2(20)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        },
+        {
+          "target": "MEMBER_ID",
+          "level": "PASS",
+          "type": "NUMBER(12)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환(정밀도 넓어짐)"
+            }
+          ]
+        },
+        {
+          "target": "ORDERED_AT",
+          "level": "PASS",
+          "type": "TIMESTAMP",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        },
+        {
+          "target": "TOTAL_AMT",
+          "level": "WARN",
+          "type": "NUMBER(15,2)",
+          "msgs": [
+            {
+              "level": "WARN",
+              "msg": "정수부 13자리 → 11자리 · 실측 최대 48,200,000이라 지금 데이터는 들어감"
+            }
+          ]
+        },
+        {
+          "target": "ORDER_STATUS",
+          "level": "PASS",
+          "type": "VARCHAR2(8)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        },
+        {
+          "target": "CHANNEL_CD",
+          "level": "ERROR",
+          "type": null,
+          "msgs": [
+            {
+              "level": "ERROR",
+              "msg": "NOT NULL 컬럼에 값이 없음 — 모든 행이 ORA-01400으로 거부됨. 원본 컬럼이나 기본값을 정하세요"
+            }
+          ]
+        },
+        {
+          "target": "CREATED_AT",
+          "level": "PASS",
+          "type": "TIMESTAMP",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "mapping": "tm-grade",
+      "mapped": 3,
+      "total": 3,
+      "level": "PASS",
+      "errors": 0,
+      "warns": 0,
+      "columns": [
+        {
+          "target": "GRADE_CODE",
+          "level": "PASS",
+          "type": "VARCHAR2(2)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        },
+        {
+          "target": "GRADE_NAME",
+          "level": "PASS",
+          "type": "VARCHAR2(50)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환"
+            }
+          ]
+        },
+        {
+          "target": "DISPLAY_ORDER",
+          "level": "PASS",
+          "type": "NUMBER(3)",
+          "msgs": [
+            {
+              "level": "PASS",
+              "msg": "호환(정밀도 넓어짐)"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "parseSelect": [
+    {
+      "key": "sample",
+      "sql": "SELECT\n    C.CUSTOMER_ID AS MEMBER_ID,\n\n    TRIM(C.CUSTOMER_NM)\n        AS MEMBER_NAME,\n\n    REGEXP_REPLACE(\n        C.PHONE_NO,\n        '[^0-9]',\n        ''\n    ) AS MOBILE_NO,\n\n    CASE\n        WHEN C.STATUS_CD = 'A'\n        THEN 'Y'\n        ELSE 'N'\n    END AS USE_YN,\n\n    G.GRADE_NM AS MEMBER_GRADE,\n\n    CAST(\n        C.REG_DT AS TIMESTAMP\n    ) AS CREATED_AT,\n\n    CAST(\n        NVL(C.MOD_DT, C.REG_DT)\n        AS TIMESTAMP\n    ) AS UPDATED_AT\n\nFROM SRC_CUSTOMER C\n\nLEFT JOIN SRC_CUSTOMER_GRADE G\n       ON G.GRADE_CD = C.GRADE_CD\n\nWHERE C.CUSTOMER_ID > :LAST_ID",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "MEMBER_ID",
+          "alias": "MEMBER_ID",
+          "expr": "C.CUSTOMER_ID",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "MEMBER_NAME",
+          "alias": "MEMBER_NAME",
+          "expr": "TRIM(C.CUSTOMER_NM)",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "MOBILE_NO",
+          "alias": "MOBILE_NO",
+          "expr": "REGEXP_REPLACE(\n        C.PHONE_NO,\n        '[^0-9]',\n        ''\n    )",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "USE_YN",
+          "alias": "USE_YN",
+          "expr": "CASE\n        WHEN C.STATUS_CD = 'A'\n        THEN 'Y'\n        ELSE 'N'\n    END",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "MEMBER_GRADE",
+          "alias": "MEMBER_GRADE",
+          "expr": "G.GRADE_NM",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "CREATED_AT",
+          "alias": "CREATED_AT",
+          "expr": "CAST(\n        C.REG_DT AS TIMESTAMP\n    )",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "UPDATED_AT",
+          "alias": "UPDATED_AT",
+          "expr": "CAST(\n        NVL(C.MOD_DT, C.REG_DT)\n        AS TIMESTAMP\n    )",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER",
+          "alias": "C",
+          "join": null,
+          "on": null
+        },
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER_GRADE",
+          "alias": "G",
+          "join": "LEFT",
+          "on": "G.GRADE_CD = C.GRADE_CD"
+        }
+      ],
+      "binds": [
+        "LAST_ID"
+      ],
+      "where": "C.CUSTOMER_ID > :LAST_ID",
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "sampleOrdered",
+      "sql": "SELECT\n    C.CUSTOMER_ID AS MEMBER_ID,\n\n    TRIM(C.CUSTOMER_NM)\n        AS MEMBER_NAME,\n\n    REGEXP_REPLACE(\n        C.PHONE_NO,\n        '[^0-9]',\n        ''\n    ) AS MOBILE_NO,\n\n    CASE\n        WHEN C.STATUS_CD = 'A'\n        THEN 'Y'\n        ELSE 'N'\n    END AS USE_YN,\n\n    G.GRADE_NM AS MEMBER_GRADE,\n\n    CAST(\n        C.REG_DT AS TIMESTAMP\n    ) AS CREATED_AT,\n\n    CAST(\n        NVL(C.MOD_DT, C.REG_DT)\n        AS TIMESTAMP\n    ) AS UPDATED_AT\n\nFROM SRC_CUSTOMER C\n\nLEFT JOIN SRC_CUSTOMER_GRADE G\n       ON G.GRADE_CD = C.GRADE_CD\n\nWHERE C.CUSTOMER_ID > :LAST_ID\nORDER BY C.CUSTOMER_ID",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "MEMBER_ID",
+          "alias": "MEMBER_ID",
+          "expr": "C.CUSTOMER_ID",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "MEMBER_NAME",
+          "alias": "MEMBER_NAME",
+          "expr": "TRIM(C.CUSTOMER_NM)",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "MOBILE_NO",
+          "alias": "MOBILE_NO",
+          "expr": "REGEXP_REPLACE(\n        C.PHONE_NO,\n        '[^0-9]',\n        ''\n    )",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "USE_YN",
+          "alias": "USE_YN",
+          "expr": "CASE\n        WHEN C.STATUS_CD = 'A'\n        THEN 'Y'\n        ELSE 'N'\n    END",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "MEMBER_GRADE",
+          "alias": "MEMBER_GRADE",
+          "expr": "G.GRADE_NM",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "CREATED_AT",
+          "alias": "CREATED_AT",
+          "expr": "CAST(\n        C.REG_DT AS TIMESTAMP\n    )",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "UPDATED_AT",
+          "alias": "UPDATED_AT",
+          "expr": "CAST(\n        NVL(C.MOD_DT, C.REG_DT)\n        AS TIMESTAMP\n    )",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER",
+          "alias": "C",
+          "join": null,
+          "on": null
+        },
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER_GRADE",
+          "alias": "G",
+          "join": "LEFT",
+          "on": "G.GRADE_CD = C.GRADE_CD"
+        }
+      ],
+      "binds": [
+        "LAST_ID"
+      ],
+      "where": "C.CUSTOMER_ID > :LAST_ID",
+      "orderBy": "C.CUSTOMER_ID",
+      "groupBy": false
+    },
+    {
+      "key": "noFromWhere",
+      "sql": "SELECT C.CUSTOMER_ID AS MEMBER_ID, TRIM(C.NOPE) AS MEMBER_NAME FROM SRC_CUSTOMER C WHERE",
+      "errors": [
+        {
+          "code": "ORA-00936",
+          "msg": "WHERE: 식이 없습니다",
+          "line": 1
+        }
+      ],
+      "warnings": [],
+      "items": [
+        {
+          "name": "MEMBER_ID",
+          "alias": "MEMBER_ID",
+          "expr": "C.CUSTOMER_ID",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "MEMBER_NAME",
+          "alias": "MEMBER_NAME",
+          "expr": "TRIM(C.NOPE)",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER",
+          "alias": "C",
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [],
+      "where": "",
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "missingParen",
+      "sql": "SELECT C.CUSTOMER_ID AS MEMBER_ID,\n  TRIM(C.CUSTOMER_NM AS MEMBER_NAME\nFROM SRC_CUSTOMER C",
+      "errors": [
+        {
+          "code": "ORA-00907",
+          "msg": "오른쪽 괄호가 없습니다",
+          "line": 3
+        },
+        {
+          "code": "ORA-00923",
+          "msg": "FROM 키워드가 필요합니다",
+          "line": 3
+        }
+      ],
+      "warnings": [],
+      "items": [],
+      "tables": [],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "notSelect",
+      "sql": "UPDATE SRC_CUSTOMER SET CUSTOMER_NM = 'x'",
+      "errors": [
+        {
+          "code": "ORA-00900",
+          "msg": "SELECT 문만 매핑할 수 있습니다",
+          "line": 1
+        }
+      ],
+      "warnings": [],
+      "items": [],
+      "tables": [],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "withComments",
+      "sql": "-- 머리 주석\nSELECT /* 별칭 */ G.GRADE_CD AS GRADE_CODE, UPPER(G.GRADE_NM) GRADE_NAME, G.SORT_SEQ\nFROM SRC_CUSTOMER_GRADE G;",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "GRADE_CODE",
+          "alias": "GRADE_CODE",
+          "expr": "G.GRADE_CD",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "GRADE_NAME",
+          "alias": "GRADE_NAME",
+          "expr": "UPPER(G.GRADE_NM)",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "SORT_SEQ",
+          "alias": null,
+          "expr": "G.SORT_SEQ",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER_GRADE",
+          "alias": "G",
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "distinctGroup",
+      "sql": "SELECT DISTINCT O.CUSTOMER_ID AS MEMBER_ID, COUNT(*) AS ORDER_CNT FROM SRC_ORDER O GROUP BY O.CUSTOMER_ID",
+      "errors": [],
+      "warnings": [
+        "GROUP BY 결과는 POC 미리보기에서 집계하지 않습니다"
+      ],
+      "items": [
+        {
+          "name": "MEMBER_ID",
+          "alias": "MEMBER_ID",
+          "expr": "O.CUSTOMER_ID",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "ORDER_CNT",
+          "alias": "ORDER_CNT",
+          "expr": "COUNT(*)",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_ORDER",
+          "alias": "O",
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": true
+    },
+    {
+      "key": "star",
+      "sql": "SELECT G.* FROM SRC_CUSTOMER_GRADE G",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "G.*",
+          "alias": null,
+          "expr": "G.*",
+          "star": true,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER_GRADE",
+          "alias": "G",
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "unknownTable",
+      "sql": "SELECT X.A AS A FROM NO_SUCH_TABLE X",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "A",
+          "alias": "A",
+          "expr": "X.A",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "NO_SUCH_TABLE",
+          "alias": "X",
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "ambiguous",
+      "sql": "SELECT CUSTOMER_ID AS MEMBER_ID FROM SRC_CUSTOMER C JOIN SRC_ORDER O ON O.CUSTOMER_ID = C.CUSTOMER_ID",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "MEMBER_ID",
+          "alias": "MEMBER_ID",
+          "expr": "CUSTOMER_ID",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER",
+          "alias": "C",
+          "join": null,
+          "on": null
+        },
+        {
+          "schema": null,
+          "name": "SRC_ORDER",
+          "alias": "O",
+          "join": "INNER",
+          "on": "O.CUSTOMER_ID = C.CUSTOMER_ID"
+        }
+      ],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "noAlias",
+      "sql": "SELECT TRIM(CUSTOMER_NM), CUSTOMER_ID FROM SRC_CUSTOMER",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "TRIM(CUSTOMER_NM)",
+          "alias": null,
+          "expr": "TRIM(CUSTOMER_NM)",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "CUSTOMER_ID",
+          "alias": null,
+          "expr": "CUSTOMER_ID",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER",
+          "alias": null,
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "dupAlias",
+      "sql": "SELECT CUSTOMER_ID AS A, CUSTOMER_NM AS A FROM SRC_CUSTOMER",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "A",
+          "alias": "A",
+          "expr": "CUSTOMER_ID",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "A",
+          "alias": "A",
+          "expr": "CUSTOMER_NM",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER",
+          "alias": null,
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "stringLiteral",
+      "sql": "SELECT 'a:b' AS LIT, :P1 AS P FROM SRC_CUSTOMER WHERE CUSTOMER_NM = ':NOT_BIND'",
+      "errors": [],
+      "warnings": [],
+      "items": [
+        {
+          "name": "LIT",
+          "alias": "LIT",
+          "expr": "'a:b'",
+          "star": false,
+          "error": null
+        },
+        {
+          "name": "P",
+          "alias": "P",
+          "expr": ":P1",
+          "star": false,
+          "error": null
+        }
+      ],
+      "tables": [
+        {
+          "schema": null,
+          "name": "SRC_CUSTOMER",
+          "alias": null,
+          "join": null,
+          "on": null
+        }
+      ],
+      "binds": [
+        "P1"
+      ],
+      "where": "CUSTOMER_NM = ':NOT_BIND'",
+      "orderBy": null,
+      "groupBy": false
+    },
+    {
+      "key": "unterminated",
+      "sql": "SELECT 'abc AS X FROM SRC_CUSTOMER",
+      "errors": [
+        {
+          "code": "ORA-01756",
+          "msg": "인용부호가 올바르게 끝나지 않았습니다",
+          "line": 1
+        },
+        {
+          "code": "ORA-00923",
+          "msg": "FROM 키워드가 필요합니다",
+          "line": 1
+        }
+      ],
+      "warnings": [],
+      "items": [],
+      "tables": [],
+      "binds": [],
+      "where": null,
+      "orderBy": null,
+      "groupBy": false
+    }
+  ],
+  "describe": [
+    {
+      "key": "sample",
+      "errors": [],
+      "columns": [
+        {
+          "name": "MEMBER_ID",
+          "type": "NUMBER(12)",
+          "expr": "C.CUSTOMER_ID",
+          "nullable": false,
+          "error": null,
+          "stats": {
+            "nulls": 0,
+            "blanks": null,
+            "maxLength": null
+          }
+        },
+        {
+          "name": "MEMBER_NAME",
+          "type": "VARCHAR2(100)",
+          "expr": "TRIM(C.CUSTOMER_NM)",
+          "nullable": true,
+          "error": null,
+          "stats": {
+            "nulls": 37,
+            "blanks": 0,
+            "maxLength": 42
+          }
+        },
+        {
+          "name": "MOBILE_NO",
+          "type": "VARCHAR2(30)",
+          "expr": "REGEXP_REPLACE(\n        C.PHONE_NO,\n        '[^0-9]',\n        ''\n    )",
+          "nullable": true,
+          "error": null,
+          "stats": {
+            "nulls": 1204,
+            "blanks": 0,
+            "maxLength": 13
+          }
+        },
+        {
+          "name": "USE_YN",
+          "type": "CHAR(1)",
+          "expr": "CASE\n        WHEN C.STATUS_CD = 'A'\n        THEN 'Y'\n        ELSE 'N'\n    END",
+          "nullable": false,
+          "error": null,
+          "stats": {
+            "nulls": 0,
+            "blanks": null,
+            "maxLength": null
+          }
+        },
+        {
+          "name": "MEMBER_GRADE",
+          "type": "VARCHAR2(50)",
+          "expr": "G.GRADE_NM",
+          "nullable": true,
+          "error": null,
+          "stats": {
+            "nulls": null,
+            "blanks": null,
+            "maxLength": 12
+          }
+        },
+        {
+          "name": "CREATED_AT",
+          "type": "TIMESTAMP",
+          "expr": "CAST(\n        C.REG_DT AS TIMESTAMP\n    )",
+          "nullable": false,
+          "error": null,
+          "stats": {
+            "nulls": 0,
+            "blanks": null,
+            "maxLength": null
+          }
+        },
+        {
+          "name": "UPDATED_AT",
+          "type": "TIMESTAMP",
+          "expr": "CAST(\n        NVL(C.MOD_DT, C.REG_DT)\n        AS TIMESTAMP\n    )",
+          "nullable": true,
+          "error": null,
+          "stats": {
+            "nulls": 0,
+            "blanks": null,
+            "maxLength": null
+          }
+        }
+      ]
+    },
+    {
+      "key": "withComments",
+      "errors": [],
+      "columns": [
+        {
+          "name": "GRADE_CODE",
+          "type": "VARCHAR2(2)",
+          "expr": "G.GRADE_CD",
+          "nullable": false,
+          "error": null,
+          "stats": {
+            "nulls": null,
+            "blanks": null,
+            "maxLength": null
+          }
+        },
+        {
+          "name": "GRADE_NAME",
+          "type": "VARCHAR2(50)",
+          "expr": "UPPER(G.GRADE_NM)",
+          "nullable": false,
+          "error": null,
+          "stats": {
+            "nulls": null,
+            "blanks": null,
+            "maxLength": 12
+          }
+        },
+        {
+          "name": "SORT_SEQ",
+          "type": "NUMBER(3)",
+          "expr": "G.SORT_SEQ",
+          "nullable": true,
+          "error": null,
+          "stats": {
+            "nulls": null,
+            "blanks": null,
+            "maxLength": null
+          }
+        }
+      ]
+    },
+    {
+      "key": "star",
+      "errors": [],
+      "columns": [
+        {
+          "name": "GRADE_CD",
+          "type": "VARCHAR2(2)",
+          "expr": "GRADE_CD",
+          "nullable": null,
+          "error": null,
+          "stats": null
+        },
+        {
+          "name": "GRADE_NM",
+          "type": "VARCHAR2(50)",
+          "expr": "GRADE_NM",
+          "nullable": null,
+          "error": null,
+          "stats": null
+        },
+        {
+          "name": "SORT_SEQ",
+          "type": "NUMBER(3)",
+          "expr": "SORT_SEQ",
+          "nullable": null,
+          "error": null,
+          "stats": null
+        }
+      ]
+    },
+    {
+      "key": "unknownTable",
+      "errors": [
+        {
+          "code": "ORA-00942",
+          "msg": "테이블 또는 뷰가 존재하지 않습니다: NO_SUCH_TABLE"
+        },
+        {
+          "code": "ORA-00904",
+          "msg": "\"X\": 부적합한 식별자 (A)"
+        }
+      ],
+      "columns": [
+        {
+          "name": "A",
+          "type": null,
+          "expr": "X.A",
+          "nullable": null,
+          "error": "ORA-00904: \"X\": 부적합한 식별자",
+          "stats": null
+        }
+      ]
+    },
+    {
+      "key": "ambiguous",
+      "errors": [
+        {
+          "code": "ORA-00918",
+          "msg": "열의 정의가 애매합니다: CUSTOMER_ID (MEMBER_ID)"
+        }
+      ],
+      "columns": [
+        {
+          "name": "MEMBER_ID",
+          "type": null,
+          "expr": "CUSTOMER_ID",
+          "nullable": null,
+          "error": "ORA-00918: 열의 정의가 애매합니다: CUSTOMER_ID",
+          "stats": null
+        }
+      ]
+    },
+    {
+      "key": "distinctGroup",
+      "errors": [],
+      "columns": [
+        {
+          "name": "MEMBER_ID",
+          "type": "NUMBER(12)",
+          "expr": "O.CUSTOMER_ID",
+          "nullable": false,
+          "error": null,
+          "stats": {
+            "nulls": null,
+            "blanks": null,
+            "maxLength": null
+          }
+        },
+        {
+          "name": "ORDER_CNT",
+          "type": "NUMBER",
+          "expr": "COUNT(*)",
+          "nullable": true,
+          "error": null,
+          "stats": {
+            "nulls": null,
+            "blanks": null,
+            "maxLength": null
+          }
+        }
+      ]
+    }
+  ],
+  "virtualSource": {
+    "mapping": "tm-sql-member",
+    "name": "SQLMAP_MEMBER",
+    "rows": 390325,
+    "baseRows": 1240325,
+    "comment": "FROM SRC_CUSTOMER C + SRC_CUSTOMER_GRADE G",
+    "columns": [
+      {
+        "name": "MEMBER_ID",
+        "type": "NUMBER(12)",
+        "nullable": false,
+        "comment": "C.CUSTOMER_ID"
+      },
+      {
+        "name": "MEMBER_NAME",
+        "type": "VARCHAR2(100)",
+        "nullable": true,
+        "comment": "TRIM(C.CUSTOMER_NM)"
+      },
+      {
+        "name": "MOBILE_NO",
+        "type": "VARCHAR2(30)",
+        "nullable": true,
+        "comment": "REGEXP_REPLACE( C.PHONE_NO, '[^0-9]', '' )"
+      },
+      {
+        "name": "USE_YN",
+        "type": "CHAR(1)",
+        "nullable": false,
+        "comment": "CASE WHEN C.STATUS_CD = 'A' THEN 'Y' ELSE 'N' END"
+      },
+      {
+        "name": "MEMBER_GRADE",
+        "type": "VARCHAR2(50)",
+        "nullable": true,
+        "comment": "G.GRADE_NM"
+      },
+      {
+        "name": "CREATED_AT",
+        "type": "TIMESTAMP",
+        "nullable": false,
+        "comment": "CAST( C.REG_DT AS TIMESTAMP )"
+      },
+      {
+        "name": "UPDATED_AT",
+        "type": "TIMESTAMP",
+        "nullable": true,
+        "comment": "CAST( NVL(C.MOD_DT, C.REG_DT) AS TIMESTAMP )"
+      }
+    ]
+  },
+  "sqlValidate": [
+    {
+      "key": "sample",
+      "level": "WARN",
+      "mapped": 7,
+      "total": 7,
+      "errorLine": null,
+      "items": [
+        {
+          "check": "SQL 구문",
+          "level": "PASS",
+          "detail": "SELECT · 결과 열 7개 · FROM SRC_CUSTOMER C, SRC_CUSTOMER_GRADE G"
+        },
+        {
+          "check": "원본 객체·열",
+          "level": "PASS",
+          "detail": "참조한 테이블 2개, 열이 모두 있음"
+        },
+        {
+          "check": "결과 열 수",
+          "level": "PASS",
+          "detail": "7개"
+        },
+        {
+          "check": "별칭",
+          "level": "PASS",
+          "detail": "모든 결과 열에 이름이 있음"
+        },
+        {
+          "check": "바인드 변수",
+          "level": "PASS",
+          "detail": ":LAST_ID"
+        },
+        {
+          "check": "대상 컬럼 매핑",
+          "level": "PASS",
+          "detail": "7 / 7 매핑"
+        },
+        {
+          "check": "형식 호환성",
+          "level": "WARN",
+          "detail": "MOBILE_NO → MOBILE_NO: VARCHAR2(30) → VARCHAR2(20) 잘림 위험 · 실측 최대 13자라 지금 데이터는 들어감"
+        },
+        {
+          "check": "NULL 처리",
+          "level": "WARN",
+          "detail": "MEMBER_NAME: NULL 37행은 거부되어 오류 테이블로 감"
+        },
+        {
+          "check": "병합 키",
+          "level": "PASS",
+          "detail": "MEMBER_ID (대상 PK MEMBER_ID)"
+        },
+        {
+          "check": "체크포인트",
+          "level": "PASS",
+          "detail": "SQL을 감싸 ORDER BY S.MEMBER_ID로 읽고, 재개할 때 마지막 커밋 값을 :LAST_ID에 넣음(= C.CUSTOMER_ID)"
+        }
+      ]
+    },
+    {
+      "key": "ordered",
+      "level": "WARN",
+      "mapped": 7,
+      "total": 7,
+      "errorLine": null,
+      "items": [
+        {
+          "check": "SQL 구문",
+          "level": "PASS",
+          "detail": "SELECT · 결과 열 7개 · FROM SRC_CUSTOMER C, SRC_CUSTOMER_GRADE G"
+        },
+        {
+          "check": "원본 객체·열",
+          "level": "PASS",
+          "detail": "참조한 테이블 2개, 열이 모두 있음"
+        },
+        {
+          "check": "결과 열 수",
+          "level": "PASS",
+          "detail": "7개"
+        },
+        {
+          "check": "별칭",
+          "level": "PASS",
+          "detail": "모든 결과 열에 이름이 있음"
+        },
+        {
+          "check": "바인드 변수",
+          "level": "PASS",
+          "detail": ":LAST_ID"
+        },
+        {
+          "check": "대상 컬럼 매핑",
+          "level": "PASS",
+          "detail": "7 / 7 매핑"
+        },
+        {
+          "check": "형식 호환성",
+          "level": "WARN",
+          "detail": "MOBILE_NO → MOBILE_NO: VARCHAR2(30) → VARCHAR2(20) 잘림 위험 · 실측 최대 13자라 지금 데이터는 들어감"
+        },
+        {
+          "check": "NULL 처리",
+          "level": "WARN",
+          "detail": "MEMBER_NAME: NULL 37행은 거부되어 오류 테이블로 감"
+        },
+        {
+          "check": "병합 키",
+          "level": "PASS",
+          "detail": "MEMBER_ID (대상 PK MEMBER_ID)"
+        },
+        {
+          "check": "체크포인트",
+          "level": "PASS",
+          "detail": "SQL을 감싸 ORDER BY S.MEMBER_ID로 읽고, 재개할 때 마지막 커밋 값을 :LAST_ID에 넣음(= C.CUSTOMER_ID)"
+        }
+      ]
+    },
+    {
+      "key": "noCheckpointBind",
+      "level": "WARN",
+      "mapped": 7,
+      "total": 7,
+      "errorLine": null,
+      "items": [
+        {
+          "check": "SQL 구문",
+          "level": "PASS",
+          "detail": "SELECT · 결과 열 7개 · FROM SRC_CUSTOMER C, SRC_CUSTOMER_GRADE G"
+        },
+        {
+          "check": "원본 객체·열",
+          "level": "PASS",
+          "detail": "참조한 테이블 2개, 열이 모두 있음"
+        },
+        {
+          "check": "결과 열 수",
+          "level": "PASS",
+          "detail": "7개"
+        },
+        {
+          "check": "별칭",
+          "level": "PASS",
+          "detail": "모든 결과 열에 이름이 있음"
+        },
+        {
+          "check": "바인드 변수",
+          "level": "PASS",
+          "detail": "없음"
+        },
+        {
+          "check": "대상 컬럼 매핑",
+          "level": "PASS",
+          "detail": "7 / 7 매핑"
+        },
+        {
+          "check": "형식 호환성",
+          "level": "WARN",
+          "detail": "MOBILE_NO → MOBILE_NO: VARCHAR2(30) → VARCHAR2(20) 잘림 위험 · 실측 최대 13자라 지금 데이터는 들어감"
+        },
+        {
+          "check": "NULL 처리",
+          "level": "WARN",
+          "detail": "MEMBER_NAME: NULL 37행은 거부되어 오류 테이블로 감"
+        },
+        {
+          "check": "병합 키",
+          "level": "PASS",
+          "detail": "MEMBER_ID (대상 PK MEMBER_ID)"
+        },
+        {
+          "check": "체크포인트",
+          "level": "INFO",
+          "detail": "SQL 안에 체크포인트 바인드 변수가 없어 바깥에서 S.MEMBER_ID > :LAST_ID로 거름.\n큰 원본이면 SQL의 WHERE에 C.CUSTOMER_ID > :LAST_ID를 넣고 CP로 표시하면 인덱스를 탐"
+        }
+      ]
+    },
+    {
+      "key": "missingBindValue",
+      "level": "ERROR",
+      "mapped": 7,
+      "total": 7,
+      "errorLine": null,
+      "items": [
+        {
+          "check": "SQL 구문",
+          "level": "PASS",
+          "detail": "SELECT · 결과 열 7개 · FROM SRC_CUSTOMER C, SRC_CUSTOMER_GRADE G"
+        },
+        {
+          "check": "원본 객체·열",
+          "level": "PASS",
+          "detail": "참조한 테이블 2개, 열이 모두 있음"
+        },
+        {
+          "check": "결과 열 수",
+          "level": "PASS",
+          "detail": "7개"
+        },
+        {
+          "check": "별칭",
+          "level": "PASS",
+          "detail": "모든 결과 열에 이름이 있음"
+        },
+        {
+          "check": "바인드 변수",
+          "level": "ERROR",
+          "detail": ":LAST_ID — 값 없음: :LAST_ID (ORA-01008)"
+        },
+        {
+          "check": "대상 컬럼 매핑",
+          "level": "PASS",
+          "detail": "7 / 7 매핑"
+        },
+        {
+          "check": "형식 호환성",
+          "level": "WARN",
+          "detail": "MOBILE_NO → MOBILE_NO: VARCHAR2(30) → VARCHAR2(20) 잘림 위험 · 실측 최대 13자라 지금 데이터는 들어감"
+        },
+        {
+          "check": "NULL 처리",
+          "level": "WARN",
+          "detail": "MEMBER_NAME: NULL 37행은 거부되어 오류 테이블로 감"
+        },
+        {
+          "check": "병합 키",
+          "level": "PASS",
+          "detail": "MEMBER_ID (대상 PK MEMBER_ID)"
+        },
+        {
+          "check": "체크포인트",
+          "level": "INFO",
+          "detail": "SQL 안에 체크포인트 바인드 변수가 없어 바깥에서 S.MEMBER_ID > :LAST_ID로 거름.\n큰 원본이면 SQL의 WHERE에 C.CUSTOMER_ID > :LAST_ID를 넣고 CP로 표시하면 인덱스를 탐"
+        }
+      ]
+    },
+    {
+      "key": "broken",
+      "level": "ERROR",
+      "mapped": 0,
+      "total": 0,
+      "errorLine": 3,
+      "items": [
+        {
+          "check": "SQL 구문",
+          "level": "ERROR",
+          "detail": "ORA-00907: 오른쪽 괄호가 없습니다 (3번 줄)\nORA-00923: FROM 키워드가 필요합니다 (3번 줄)"
+        }
+      ]
+    },
+    {
+      "key": "noTarget",
+      "level": "ERROR",
+      "mapped": 0,
+      "total": 0,
+      "errorLine": null,
+      "items": [
+        {
+          "check": "SQL 구문",
+          "level": "PASS",
+          "detail": "SELECT · 결과 열 7개 · FROM SRC_CUSTOMER C, SRC_CUSTOMER_GRADE G"
+        },
+        {
+          "check": "원본 객체·열",
+          "level": "PASS",
+          "detail": "참조한 테이블 2개, 열이 모두 있음"
+        },
+        {
+          "check": "결과 열 수",
+          "level": "PASS",
+          "detail": "7개"
+        },
+        {
+          "check": "별칭",
+          "level": "PASS",
+          "detail": "모든 결과 열에 이름이 있음"
+        },
+        {
+          "check": "바인드 변수",
+          "level": "PASS",
+          "detail": ":LAST_ID"
+        },
+        {
+          "check": "대상 컬럼 매핑",
+          "level": "ERROR",
+          "detail": "대상 테이블을 고르세요"
+        },
+        {
+          "check": "체크포인트",
+          "level": "PASS",
+          "detail": "SQL을 감싸 ORDER BY S.MEMBER_ID로 읽고, 재개할 때 마지막 커밋 값을 :LAST_ID에 넣음(= C.CUSTOMER_ID)"
+        }
+      ]
+    }
+  ],
+  "sqlgen": {
+    "sourceSelectTableWorkers4": "-- 원본 읽기: Fetch 5,000행씩 스트리밍\n-- :LAST_ID = 체크포인트(없으면 처음부터)\n-- 작업자 4개: CUSTOMER_ID 범위를 나눠 :RANGE_TO까지씩 읽음\nSELECT\n    CUSTOMER_ID AS MEMBER_ID,\n    TRIM(CUSTOMER_NM) AS MEMBER_NAME,\n    REGEXP_REPLACE(PHONE_NO, '[^0-9]', '') AS MOBILE_NO,\n    NVL(CASE\n        WHEN STATUS_CD = 'A' THEN 'Y'\n        ELSE 'N'\n    END, 'Y') AS USE_YN,\n    NVL(CAST(REG_DT AS TIMESTAMP), SYSTIMESTAMP) AS CREATED_AT,\n    CAST(NVL(MOD_DT, REG_DT) AS TIMESTAMP) AS UPDATED_AT\nFROM LEGACY_APP.SRC_CUSTOMER\nWHERE CUSTOMER_ID > :LAST_ID\n  AND CUSTOMER_ID <= :RANGE_TO\nORDER BY CUSTOMER_ID",
+    "sourceSelectTableWorkers1Where": "-- 원본 읽기: Fetch 5,000행씩 스트리밍\n-- :LAST_ID = 체크포인트(없으면 처음부터)\nSELECT\n    ORDER_NO AS ORDER_NO,\n    CUSTOMER_ID AS MEMBER_ID,\n    CAST(ORDER_DT AS TIMESTAMP) AS ORDERED_AT,\n    ORDER_AMT AS TOTAL_AMT,\n    DECODE(ORDER_STAT_CD,\n           '10', 'ORDERED',\n           '20', 'PAID',\n           '30', 'SHIPPED',\n           '90', 'CANCELED',\n           'UNKNOWN') AS ORDER_STATUS,\n    CAST(REG_DT AS TIMESTAMP) AS CREATED_AT\nFROM LEGACY_APP.SRC_ORDER\nWHERE ORDER_NO > :LAST_ID\n  AND (ORDER_STAT_CD <> '00')\nORDER BY ORDER_NO",
+    "sourceSelectSql": "-- 원본 읽기: Fetch 5,000행씩 스트리밍\n-- 원본 SQL을 인라인 뷰 S로 감싸 변환식·NULL 처리·체크포인트를 붙임\n-- :LAST_ID = 체크포인트(SQL 안 조건, 없으면 입력한 값)\n-- 작업자 4개: MEMBER_ID 범위를 나눠 :RANGE_TO까지씩 읽음\nSELECT\n    MEMBER_ID AS MEMBER_ID,\n    MEMBER_NAME AS MEMBER_NAME,\n    MOBILE_NO AS MOBILE_NO,\n    NVL(USE_YN, 'Y') AS USE_YN,\n    MEMBER_GRADE AS MEMBER_GRADE,\n    CREATED_AT AS CREATED_AT,\n    UPDATED_AT AS UPDATED_AT\nFROM (\n    SELECT\n        C.CUSTOMER_ID AS MEMBER_ID,\n    \n        TRIM(C.CUSTOMER_NM)\n            AS MEMBER_NAME,\n    \n        REGEXP_REPLACE(\n            C.PHONE_NO,\n            '[^0-9]',\n            ''\n        ) AS MOBILE_NO,\n    \n        CASE\n            WHEN C.STATUS_CD = 'A'\n            THEN 'Y'\n            ELSE 'N'\n        END AS USE_YN,\n    \n        G.GRADE_NM AS MEMBER_GRADE,\n    \n        CAST(\n            C.REG_DT AS TIMESTAMP\n        ) AS CREATED_AT,\n    \n        CAST(\n            NVL(C.MOD_DT, C.REG_DT)\n            AS TIMESTAMP\n        ) AS UPDATED_AT\n    \n    FROM SRC_CUSTOMER C\n    \n    LEFT JOIN SRC_CUSTOMER_GRADE G\n           ON G.GRADE_CD = C.GRADE_CD\n    \n    WHERE C.CUSTOMER_ID > :LAST_ID\n) S\nWHERE S.MEMBER_ID <= :RANGE_TO\nORDER BY S.MEMBER_ID",
+    "writeColumnsCustomer": [
+      {
+        "name": "MEMBER_ID",
+        "expr": "CUSTOMER_ID"
+      },
+      {
+        "name": "MEMBER_NAME",
+        "expr": "TRIM(CUSTOMER_NM)"
+      },
+      {
+        "name": "MOBILE_NO",
+        "expr": "REGEXP_REPLACE(PHONE_NO, '[^0-9]', '')"
+      },
+      {
+        "name": "USE_YN",
+        "expr": "NVL(CASE\n    WHEN STATUS_CD = 'A' THEN 'Y'\n    ELSE 'N'\nEND, 'Y')"
+      },
+      {
+        "name": "CREATED_AT",
+        "expr": "NVL(CAST(REG_DT AS TIMESTAMP), SYSTIMESTAMP)"
+      },
+      {
+        "name": "UPDATED_AT",
+        "expr": "CAST(NVL(MOD_DT, REG_DT) AS TIMESTAMP)"
+      }
+    ],
+    "write": {
+      "INSERT_ONLY": "INSERT INTO NEXT_APP.TB_MEMBER (\n    MEMBER_ID,\n    MEMBER_NAME,\n    MOBILE_NO,\n    USE_YN,\n    CREATED_AT,\n    UPDATED_AT\n)\nVALUES (\n    :MEMBER_ID,\n    :MEMBER_NAME,\n    :MOBILE_NO,\n    :USE_YN,\n    :CREATED_AT,\n    :UPDATED_AT\n)\nLOG ERRORS INTO NEXT_APP.ERR$_TB_MEMBER ('RUN_ID') REJECT LIMIT UNLIMITED",
+      "INSERT_ONLY_noErrorTable_noKey": "INSERT INTO NEXT_APP.TB_MEMBER (\n    MEMBER_ID,\n    MEMBER_NAME,\n    MOBILE_NO,\n    USE_YN,\n    CREATED_AT,\n    UPDATED_AT\n)\nVALUES (\n    :MEMBER_ID,\n    :MEMBER_NAME,\n    :MOBILE_NO,\n    :USE_YN,\n    :CREATED_AT,\n    :UPDATED_AT\n)",
+      "MERGE": "MERGE INTO NEXT_APP.TB_MEMBER T\nUSING (\n    SELECT\n        :MEMBER_ID AS MEMBER_ID,\n        :MEMBER_NAME AS MEMBER_NAME,\n        :MOBILE_NO AS MOBILE_NO,\n        :USE_YN AS USE_YN,\n        :CREATED_AT AS CREATED_AT,\n        :UPDATED_AT AS UPDATED_AT\n    FROM DUAL\n) S\nON (\n    T.MEMBER_ID = S.MEMBER_ID\n)\nWHEN MATCHED THEN\n    UPDATE SET\n        T.MEMBER_NAME = S.MEMBER_NAME,\n        T.MOBILE_NO = S.MOBILE_NO,\n        T.USE_YN = S.USE_YN,\n        T.CREATED_AT = S.CREATED_AT,\n        T.UPDATED_AT = S.UPDATED_AT\nWHEN NOT MATCHED THEN\n    INSERT (\n        MEMBER_ID,\n        MEMBER_NAME,\n        MOBILE_NO,\n        USE_YN,\n        CREATED_AT,\n        UPDATED_AT\n    )\n    VALUES (\n        S.MEMBER_ID,\n        S.MEMBER_NAME,\n        S.MOBILE_NO,\n        S.USE_YN,\n        S.CREATED_AT,\n        S.UPDATED_AT\n    )\nLOG ERRORS INTO NEXT_APP.ERR$_TB_MEMBER ('RUN_ID') REJECT LIMIT UNLIMITED",
+      "MERGE_noErrorTable_noKey": "-- 병합 키를 정하세요(MERGE는 키로 대상 행을 찾습니다)",
+      "TRUNCATE_INSERT": "-- 시작할 때 한 번(되돌릴 수 없음)\nTRUNCATE TABLE NEXT_APP.TB_MEMBER;\n\n-- 배치마다\nINSERT INTO NEXT_APP.TB_MEMBER (\n    MEMBER_ID,\n    MEMBER_NAME,\n    MOBILE_NO,\n    USE_YN,\n    CREATED_AT,\n    UPDATED_AT\n)\nVALUES (\n    :MEMBER_ID,\n    :MEMBER_NAME,\n    :MOBILE_NO,\n    :USE_YN,\n    :CREATED_AT,\n    :UPDATED_AT\n)\nLOG ERRORS INTO NEXT_APP.ERR$_TB_MEMBER ('RUN_ID') REJECT LIMIT UNLIMITED",
+      "TRUNCATE_INSERT_noErrorTable_noKey": "-- 시작할 때 한 번(되돌릴 수 없음)\nTRUNCATE TABLE NEXT_APP.TB_MEMBER;\n\n-- 배치마다\nINSERT INTO NEXT_APP.TB_MEMBER (\n    MEMBER_ID,\n    MEMBER_NAME,\n    MOBILE_NO,\n    USE_YN,\n    CREATED_AT,\n    UPDATED_AT\n)\nVALUES (\n    :MEMBER_ID,\n    :MEMBER_NAME,\n    :MOBILE_NO,\n    :USE_YN,\n    :CREATED_AT,\n    :UPDATED_AT\n)",
+      "DELETE_INSERT": "-- 배치마다: 같은 키의 대상 행을 지우고 넣음\nDELETE FROM NEXT_APP.TB_MEMBER\nWHERE MEMBER_ID = :MEMBER_ID;\n\nINSERT INTO NEXT_APP.TB_MEMBER (\n    MEMBER_ID,\n    MEMBER_NAME,\n    MOBILE_NO,\n    USE_YN,\n    CREATED_AT,\n    UPDATED_AT\n)\nVALUES (\n    :MEMBER_ID,\n    :MEMBER_NAME,\n    :MOBILE_NO,\n    :USE_YN,\n    :CREATED_AT,\n    :UPDATED_AT\n)\nLOG ERRORS INTO NEXT_APP.ERR$_TB_MEMBER ('RUN_ID') REJECT LIMIT UNLIMITED",
+      "DELETE_INSERT_noErrorTable_noKey": "-- 삭제 키를 정하세요"
+    },
+    "literal": [
+      {
+        "value": "Y",
+        "type": "CHAR(1)",
+        "result": "'Y'"
+      },
+      {
+        "value": "10",
+        "type": "NUMBER(5)",
+        "result": "10"
+      },
+      {
+        "value": "10",
+        "type": "VARCHAR2(5)",
+        "result": "'10'"
+      },
+      {
+        "value": "O'Brien",
+        "type": "VARCHAR2(20)",
+        "result": "'O''Brien'"
+      },
+      {
+        "value": "'Y'",
+        "type": "CHAR(1)",
+        "result": "'Y'"
+      },
+      {
+        "value": "SYSDATE",
+        "type": "DATE",
+        "result": "SYSDATE"
+      },
+      {
+        "value": "",
+        "type": "VARCHAR2(5)",
+        "result": "NULL"
+      },
+      {
+        "value": null,
+        "type": "NUMBER",
+        "result": "NULL"
+      }
+    ],
+    "valueExpr": [
+      {
+        "rule": "ALLOW",
+        "source": "REG_DT",
+        "expr": "CAST(REG_DT AS TIMESTAMP)",
+        "defaultValue": "SYSTIMESTAMP",
+        "targetType": "TIMESTAMP",
+        "result": "CAST(REG_DT AS TIMESTAMP)"
+      },
+      {
+        "rule": "ALLOW",
+        "source": null,
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": null
+      },
+      {
+        "rule": "ALLOW",
+        "source": "STATUS_CD",
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "STATUS_CD"
+      },
+      {
+        "rule": "REJECT",
+        "source": "REG_DT",
+        "expr": "CAST(REG_DT AS TIMESTAMP)",
+        "defaultValue": "SYSTIMESTAMP",
+        "targetType": "TIMESTAMP",
+        "result": "CAST(REG_DT AS TIMESTAMP)"
+      },
+      {
+        "rule": "REJECT",
+        "source": null,
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": null
+      },
+      {
+        "rule": "REJECT",
+        "source": "STATUS_CD",
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "STATUS_CD"
+      },
+      {
+        "rule": "DEFAULT",
+        "source": "REG_DT",
+        "expr": "CAST(REG_DT AS TIMESTAMP)",
+        "defaultValue": "SYSTIMESTAMP",
+        "targetType": "TIMESTAMP",
+        "result": "NVL(CAST(REG_DT AS TIMESTAMP), SYSTIMESTAMP)"
+      },
+      {
+        "rule": "DEFAULT",
+        "source": null,
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "'Y'"
+      },
+      {
+        "rule": "DEFAULT",
+        "source": "STATUS_CD",
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "NVL(STATUS_CD, 'Y')"
+      },
+      {
+        "rule": "SYSDATE",
+        "source": "REG_DT",
+        "expr": "CAST(REG_DT AS TIMESTAMP)",
+        "defaultValue": "SYSTIMESTAMP",
+        "targetType": "TIMESTAMP",
+        "result": "NVL(CAST(REG_DT AS TIMESTAMP), SYSTIMESTAMP)"
+      },
+      {
+        "rule": "SYSDATE",
+        "source": null,
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "SYSDATE"
+      },
+      {
+        "rule": "SYSDATE",
+        "source": "STATUS_CD",
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "NVL(STATUS_CD, SYSDATE)"
+      },
+      {
+        "rule": "EMPTY",
+        "source": "REG_DT",
+        "expr": "CAST(REG_DT AS TIMESTAMP)",
+        "defaultValue": "SYSTIMESTAMP",
+        "targetType": "TIMESTAMP",
+        "result": "NVL(CAST(REG_DT AS TIMESTAMP), '')"
+      },
+      {
+        "rule": "EMPTY",
+        "source": null,
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": null
+      },
+      {
+        "rule": "EMPTY",
+        "source": "STATUS_CD",
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "NVL(STATUS_CD, '')"
+      },
+      {
+        "rule": "CUSTOM",
+        "source": "REG_DT",
+        "expr": "CAST(REG_DT AS TIMESTAMP)",
+        "defaultValue": "SYSTIMESTAMP",
+        "targetType": "TIMESTAMP",
+        "result": "NVL(CAST(REG_DT AS TIMESTAMP), SYSTIMESTAMP)"
+      },
+      {
+        "rule": "CUSTOM",
+        "source": null,
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "Y"
+      },
+      {
+        "rule": "CUSTOM",
+        "source": "STATUS_CD",
+        "expr": "",
+        "defaultValue": "Y",
+        "targetType": "CHAR(1)",
+        "result": "NVL(STATUS_CD, Y)"
+      }
+    ],
+    "errorTableFor": [
+      {
+        "strategy": {
+          "errorPolicy": "CONTINUE",
+          "errorTable": "ERR$_"
+        },
+        "target": "TB_MEMBER",
+        "result": "ERR$_TB_MEMBER"
+      },
+      {
+        "strategy": {
+          "errorPolicy": "CONTINUE",
+          "errorTable": "MIG_ERRORS"
+        },
+        "target": "TB_MEMBER",
+        "result": "MIG_ERRORS"
+      },
+      {
+        "strategy": {
+          "errorPolicy": "STOP",
+          "errorTable": "ERR$_"
+        },
+        "target": "TB_MEMBER",
+        "result": null
+      }
+    ]
+  },
+  "jobV1": {
+    "format": "folderss-migration-job",
+    "version": 1,
+    "jobName": "OLD_JOB",
+    "source": {
+      "kind": "oracle",
+      "name": "LEGACY_PROD",
+      "color": "red",
+      "host": "10.10.10.21",
+      "port": "1521",
+      "service": "LEGACY",
+      "schema": "LEGACY_APP",
+      "user": "LEGACY_APP",
+      "password": "should-be-dropped"
+    },
+    "target": {
+      "name": "NEXT_PROD",
+      "schema": "NEXT_APP"
+    },
+    "strategy": {
+      "mode": "FULL",
+      "commitSize": 10000
+    },
+    "tableMappings": [
+      {
+        "id": "tm-a",
+        "use": true,
+        "source": "SRC_CUSTOMER",
+        "target": "TB_MEMBER",
+        "mode": "MERGE",
+        "mergeKey": [
+          "MEMBER_ID"
+        ],
+        "checkpointColumn": "CUSTOMER_ID",
+        "columns": [
+          {
+            "target": "MEMBER_ID",
+            "source": "CUSTOMER_ID",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          }
+        ]
+      }
+    ],
+    "sqlMappings": [
+      {
+        "id": "sm-x",
+        "use": false,
+        "name": "SQLMAP_X",
+        "sql": "SELECT 1 AS A FROM DUAL",
+        "targetTable": "TB_MEMBER",
+        "writeStrategy": "MERGE",
+        "mergeKey": [
+          "MEMBER_ID"
+        ],
+        "fetchSize": 5000,
+        "commitSize": 10000,
+        "checkpointColumn": "A",
+        "binds": [],
+        "aliasMap": {
+          "A": "MEMBER_ID"
+        }
+      }
+    ],
+    "checkpoints": {
+      "tm-a": {
+        "column": "CUSTOMER_ID",
+        "value": 850000,
+        "rows": 850000,
+        "total": 1240325,
+        "at": "2026-10-02 23:41:07",
+        "runId": "R-1",
+        "status": "stopped"
+      }
+    }
+  },
+  "jobV1Upgraded": {
+    "version": 2,
+    "source": {
+      "profileId": null,
+      "schema": "LEGACY_APP",
+      "name": "LEGACY_PROD",
+      "kind": "oracle",
+      "host": "10.10.10.21",
+      "port": "1521",
+      "service": "LEGACY",
+      "user": "LEGACY_APP",
+      "color": "red"
+    },
+    "target": {
+      "profileId": null,
+      "schema": "NEXT_APP",
+      "name": "NEXT_PROD"
+    },
+    "mappings": [
+      {
+        "id": "tm-a",
+        "use": true,
+        "sourceType": "TABLE",
+        "source": "SRC_CUSTOMER",
+        "sql": null,
+        "target": "TB_MEMBER",
+        "mode": "MERGE",
+        "mergeKey": [
+          "MEMBER_ID"
+        ],
+        "checkpointColumn": "CUSTOMER_ID",
+        "columns": [
+          {
+            "target": "MEMBER_ID",
+            "source": "CUSTOMER_ID",
+            "expr": "",
+            "nullRule": "REJECT",
+            "defaultValue": ""
+          }
+        ]
+      },
+      {
+        "id": "sm-x",
+        "use": false,
+        "sourceType": "SQL",
+        "source": "SQLMAP_X",
+        "sql": "SELECT 1 AS A FROM DUAL",
+        "target": "TB_MEMBER",
+        "mode": "MERGE",
+        "mergeKey": [
+          "MEMBER_ID"
+        ],
+        "checkpointColumn": "A",
+        "columns": [
+          {
+            "target": "MEMBER_ID",
+            "source": "A",
+            "expr": "",
+            "nullRule": "ALLOW",
+            "defaultValue": ""
+          }
+        ]
+      }
+    ],
+    "checkpoints": {
+      "tm-a": {
+        "column": "CUSTOMER_ID",
+        "value": 850000,
+        "rows": 850000,
+        "total": 1240325,
+        "at": "2026-10-02 23:41:07",
+        "runId": "R-1",
+        "status": "stopped"
+      }
+    }
+  },
+  "yamlSample": "# Folderss Migration Studio 작업 파일\nformat: folderss-migration-job\nversion: 2\njobName: CUSTOMER_MIGRATION\ndescription: 레거시 고객·주문 데이터를 NEXT_APP 스키마로 이관\nsource:\n  profileId: cn-legacy-prod\n  schema: LEGACY_APP\n  name: LEGACY_PROD\n  kind: oracle\n  host: '10.10.10.21'\n  port: '1521'\n  service: LEGACY\n  user: LEGACY_APP\ntarget:\n  profileId: cn-next-prod\n  schema: NEXT_APP\n  name: NEXT_PROD\n  kind: oracle\n  host: '10.20.10.35'\n  port: '1521'\n  service: NEXTDB\n  user: NEXT_APP\nstrategy:\n  mode: FULL\n  incrementalBy: PK\n  commitSize: 10000\n  fetchSize: 5000\n  errorPolicy: CONTINUE\n  errorTable: ERR$_\n  workers: 4\nmappings:\n  - id: tm-customer\n    use: true\n    sourceType: TABLE\n    source: SRC_CUSTOMER\n    target: TB_MEMBER\n    mode: MERGE\n    mergeKey:\n      - MEMBER_ID\n    checkpointColumn: CUSTOMER_ID\n    where: ''\n    columns:\n      - target: MEMBER_ID\n        source: CUSTOMER_ID\n        expr: ''\n        nullRule: REJECT\n        defaultValue: ''\n      - target: MEMBER_NAME\n        source: CUSTOMER_NM\n        expr: TRIM(CUSTOMER_NM)\n        nullRule: REJECT\n        defaultValue: ''\n      - target: MOBILE_NO\n        source: PHONE_NO\n        expr: 'REGEXP_REPLACE(PHONE_NO, ''[^0-9]'', '''')'\n        nullRule: ALLOW\n        defaultValue: ''\n      - target: USE_YN\n        source: STATUS_CD\n        expr: |\n          CASE\n              WHEN STATUS_CD = 'A' THEN 'Y'\n              ELSE 'N'\n          END\n        nullRule: DEFAULT\n        defaultValue: Y\n      - target: MEMBER_GRADE\n        source: null\n        expr: ''\n        nullRule: ALLOW\n        defaultValue: ''\n      - target: CREATED_AT\n        source: REG_DT\n        expr: CAST(REG_DT AS TIMESTAMP)\n        nullRule: SYSDATE\n        defaultValue: ''\n      - target: UPDATED_AT\n        source: MOD_DT\n        expr: 'CAST(NVL(MOD_DT, REG_DT) AS TIMESTAMP)'\n        nullRule: ALLOW\n        defaultValue: ''\n  - id: tm-order\n    use: true\n    sourceType: TABLE\n    source: SRC_ORDER\n    target: TB_SALES_ORDER\n    mode: INSERT_ONLY\n    mergeKey:\n      - ORDER_NO\n    checkpointColumn: ORDER_NO\n    where: 'ORDER_STAT_CD <> ''00'''\n    columns:\n      - target: ORDER_NO\n        source: ORDER_NO\n        expr: ''\n        nullRule: REJECT\n        defaultValue: ''\n      - target: MEMBER_ID\n        source: CUSTOMER_ID\n        expr: ''\n        nullRule: REJECT\n        defaultValue: ''\n      - target: ORDERED_AT\n        source: ORDER_DT\n        expr: CAST(ORDER_DT AS TIMESTAMP)\n        nullRule: REJECT\n        defaultValue: ''\n      - target: TOTAL_AMT\n        source: ORDER_AMT\n        expr: ''\n        nullRule: ALLOW\n        defaultValue: ''\n      - target: ORDER_STATUS\n        source: ORDER_STAT_CD\n        expr: |\n          DECODE(ORDER_STAT_CD,\n                 '10', 'ORDERED',\n                 '20', 'PAID',\n                 '30', 'SHIPPED',\n                 '90', 'CANCELED',\n                 'UNKNOWN')\n        nullRule: REJECT\n        defaultValue: ''\n      - target: CHANNEL_CD\n        source: null\n        expr: ''\n        nullRule: REJECT\n        defaultValue: ''\n      - target: CREATED_AT\n        source: REG_DT\n        expr: CAST(REG_DT AS TIMESTAMP)\n        nullRule: ALLOW\n        defaultValue: ''\n  - id: tm-grade\n    use: true\n    sourceType: TABLE\n    source: SRC_CUSTOMER_GRADE\n    target: TB_MEMBER_GRADE\n    mode: TRUNCATE_INSERT\n    mergeKey:\n      - GRADE_CODE\n    checkpointColumn: null\n    where: ''\n    columns:\n      - target: GRADE_CODE\n        source: GRADE_CD\n        expr: ''\n        nullRule: REJECT\n        defaultValue: ''\n      - target: GRADE_NAME\n        source: GRADE_NM\n        expr: TRIM(GRADE_NM)\n        nullRule: REJECT\n        defaultValue: ''\n      - target: DISPLAY_ORDER\n        source: SORT_SEQ\n        expr: ''\n        nullRule: ALLOW\n        defaultValue: ''\n  - id: tm-sql-member\n    use: false\n    sourceType: SQL\n    source: SQLMAP_MEMBER\n    sql: |\n      SELECT\n          C.CUSTOMER_ID AS MEMBER_ID,\n      \n          TRIM(C.CUSTOMER_NM)\n              AS MEMBER_NAME,\n      \n          REGEXP_REPLACE(\n              C.PHONE_NO,\n              '[^0-9]',\n              ''\n          ) AS MOBILE_NO,\n      \n          CASE\n              WHEN C.STATUS_CD = 'A'\n              THEN 'Y'\n              ELSE 'N'\n          END AS USE_YN,\n      \n          G.GRADE_NM AS MEMBER_GRADE,\n      \n          CAST(\n              C.REG_DT AS TIMESTAMP\n          ) AS CREATED_AT,\n      \n          CAST(\n              NVL(C.MOD_DT, C.REG_DT)\n              AS TIMESTAMP\n          ) AS UPDATED_AT\n      \n      FROM SRC_CUSTOMER C\n      \n      LEFT JOIN SRC_CUSTOMER_GRADE G\n             ON G.GRADE_CD = C.GRADE_CD\n      \n      WHERE C.CUSTOMER_ID > :LAST_ID\n    binds:\n      - name: LAST_ID\n        type: NUMBER\n        value: '850000'\n        fromCheckpoint: true\n    target: TB_MEMBER\n    mode: MERGE\n    mergeKey:\n      - MEMBER_ID\n    checkpointColumn: MEMBER_ID\n    where: ''\n    fetchSize: 5000\n    commitSize: 10000\n    columns:\n      - target: MEMBER_ID\n        source: MEMBER_ID\n        expr: ''\n        nullRule: REJECT\n        defaultValue: ''\n      - target: MEMBER_NAME\n        source: MEMBER_NAME\n        expr: ''\n        nullRule: REJECT\n        defaultValue: ''\n      - target: MOBILE_NO\n        source: MOBILE_NO\n        expr: ''\n        nullRule: ALLOW\n        defaultValue: ''\n      - target: USE_YN\n        source: USE_YN\n        expr: ''\n        nullRule: DEFAULT\n        defaultValue: Y\n      - target: MEMBER_GRADE\n        source: MEMBER_GRADE\n        expr: ''\n        nullRule: ALLOW\n        defaultValue: ''\n      - target: CREATED_AT\n        source: CREATED_AT\n        expr: ''\n        nullRule: ALLOW\n        defaultValue: ''\n      - target: UPDATED_AT\n        source: UPDATED_AT\n        expr: ''\n        nullRule: ALLOW\n        defaultValue: ''\ncheckpoints:\n  tm-customer:\n    column: CUSTOMER_ID\n    value: 850000\n    rows: 850000\n    total: 1240325\n    at: '2026-10-02 23:41:07'\n    runId: R-20261002-234107\n    status: stopped\n",
+  "settingsDefaults": {
+    "version": 1,
+    "connections": [
+      {
+        "id": "cn-legacy-prod",
+        "name": "LEGACY_PROD",
+        "kind": "oracle",
+        "color": "red",
+        "host": "10.10.10.21",
+        "port": "1521",
+        "service": "LEGACY",
+        "user": "LEGACY_APP",
+        "password": "legacy#2026",
+        "savePassword": true,
+        "defaultSchema": "LEGACY_APP",
+        "writeBlocked": true
+      },
+      {
+        "id": "cn-legacy-dev",
+        "name": "LEGACY_DEV",
+        "kind": "oracle",
+        "color": "green",
+        "host": "10.10.30.11",
+        "port": "1521",
+        "service": "LEGACYDEV",
+        "user": "LEGACY_APP",
+        "password": "dev",
+        "savePassword": true,
+        "defaultSchema": "LEGACY_APP",
+        "writeBlocked": false
+      },
+      {
+        "id": "cn-next-prod",
+        "name": "NEXT_PROD",
+        "kind": "oracle",
+        "color": "red",
+        "host": "10.20.10.35",
+        "port": "1521",
+        "service": "NEXTDB",
+        "user": "NEXT_APP",
+        "password": "next#2026",
+        "savePassword": true,
+        "defaultSchema": "NEXT_APP",
+        "writeBlocked": false
+      },
+      {
+        "id": "cn-next-stg",
+        "name": "NEXT_STG",
+        "kind": "oracle",
+        "color": "yellow",
+        "host": "10.20.20.12",
+        "port": "1521",
+        "service": "NEXTSTG",
+        "user": "NEXT_APP",
+        "password": "",
+        "savePassword": false,
+        "defaultSchema": "NEXT_APP",
+        "writeBlocked": false
+      }
+    ],
+    "defaults": {
+      "commitSize": 10000,
+      "fetchSize": 5000,
+      "workers": 4,
+      "errorPolicy": "CONTINUE",
+      "errorTable": "ERR$_",
+      "checkpointStore": "AUTO",
+      "controlPrefix": "MIG_"
+    },
+    "agent": {
+      "onHostExit": "CONTINUE",
+      "maxConcurrent": 1,
+      "logDays": 30
+    }
+  }
+}

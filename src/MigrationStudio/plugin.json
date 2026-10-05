@@ -1,0 +1,9 @@
+{
+  "id": "zaruous.folderss-oracle-migration",
+  "name": "Migration Studio",
+  "version": "1.0.0",
+  "description": "Oracle 간 데이터 이관(테이블·SQL 원본 매핑, 변환식, 검증, 체크포인트 재개)",
+  "assembly": "MigrationStudio.dll",
+  "type": "MigrationStudio.MigrationPlugin",
+  "hasSettings": true
+}

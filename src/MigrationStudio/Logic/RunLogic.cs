@@ -1,0 +1,460 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using MigrationStudio.Core.Engine;
+using MigrationStudio.Core.Model;
+using MigrationStudio.Core.Validation;
+
+namespace MigrationStudio.Logic
+{
+    /// <summary>실행 화면의 상태 문자열 모음.</summary>
+    public static class RunStates
+    {
+        public const string Idle = "idle";
+        public const string Starting = "starting";
+        public const string Running = "running";
+        public const string Pausing = "pausing";
+        public const string Paused = "paused";
+        public const string Done = "done";
+        public const string Stopped = "stopped";
+        public const string Failed = "failed";
+        /// <summary>파이프가 끊겼지만 에이전트는 살아 있음.</summary>
+        public const string Detached = "detached";
+    }
+
+    public sealed class ControlState
+    {
+        public bool CanStart { get; set; }
+        public bool CanPause { get; set; }
+        public bool CanResume { get; set; }
+        public bool CanStop { get; set; }
+        public bool CanChangeMode { get; set; }
+    }
+
+    public sealed class StageModel
+    {
+        public string Name { get; set; }
+        public string Metric { get; set; }
+        public string Sub { get; set; }
+        public double Percent { get; set; }
+        public bool Active { get; set; }
+    }
+
+    public sealed class TaskRowModel
+    {
+        public int Index { get; set; }
+        public string Label { get; set; }
+        public string Sub { get; set; }
+        public string StatusText { get; set; }
+        /// <summary>wait · run · paused · done · stopped · failed · skipped (배지 색)</summary>
+        public string StatusKind { get; set; }
+        public double Percent { get; set; }
+        public string RowsText { get; set; }
+        public string Inserted { get; set; }
+        public string Updated { get; set; }
+        public string Rejected { get; set; }
+        public bool HasRejects { get; set; }
+        public string Checkpoint { get; set; }
+        public bool Running { get; set; }
+    }
+
+    public sealed class RunSummaryInput
+    {
+        public string State { get; set; }
+        public double Pct { get; set; }
+        public double Elapsed { get; set; }
+        public bool Dry { get; set; }
+        public int ResumablePct { get; set; } = -1;
+    }
+
+    /// <summary>시작 버튼을 눌렀을 때 거쳐야 하는 확인 하나.</summary>
+    public enum StartGate
+    {
+        Proceed,
+        NeedMetadata,
+        NoSelection,
+        NoCheckpointToResume,
+        AskValidateFirst,
+        Blocked,
+        ConfirmStale,
+        ConfirmDestructive
+    }
+
+    public sealed class StartInputs
+    {
+        public bool HasMetadata { get; set; }
+        public int SelectedCount { get; set; }
+        public string Mode { get; set; }
+        public bool HasValidation { get; set; }
+        public bool ValidationRunning { get; set; }
+        public bool ValidationStale { get; set; }
+        public GateResult Gate { get; set; }
+        public List<string> DestructiveLabels { get; set; } = new List<string>();
+        public int SelectedWithCheckpoint { get; set; }
+        /// <summary>사용자가 이미 넘긴 확인.</summary>
+        public bool SkipValidateAsk { get; set; }
+        public bool StaleAccepted { get; set; }
+        public bool DestructiveAccepted { get; set; }
+    }
+
+    /// <summary>실행 화면의 순수 논리(WPF 없음, 시험 대상).</summary>
+    public static class RunLogic
+    {
+        public static bool IsActive(string state)
+        {
+            return state == RunStates.Starting || state == RunStates.Running || state == RunStates.Pausing || state == RunStates.Paused;
+        }
+
+        public static string StateText(string state, bool dry)
+        {
+            string text;
+            switch (state)
+            {
+                case RunStates.Starting: text = "시작 중…"; break;
+                case RunStates.Running: text = "실행 중"; break;
+                case RunStates.Pausing: text = "일시 정지 요청…"; break;
+                case RunStates.Paused: text = "일시 정지"; break;
+                case RunStates.Done: text = "완료"; break;
+                case RunStates.Stopped: text = "중지됨"; break;
+                case RunStates.Failed: text = "실패"; break;
+                case RunStates.Detached: text = "연결 끊김"; break;
+                default: text = "대기"; break;
+            }
+
+            return (dry && state != RunStates.Idle ? "Dry Run · " : "") + text;
+        }
+
+        /// <summary>상태 Pill 종류: run · warn · ok · err · "" (보통).</summary>
+        public static string PillKind(string state)
+        {
+            switch (state)
+            {
+                case RunStates.Starting:
+                case RunStates.Running: return "run";
+                case RunStates.Pausing:
+                case RunStates.Paused:
+                case RunStates.Stopped:
+                case RunStates.Detached: return "warn";
+                case RunStates.Done: return "ok";
+                case RunStates.Failed: return "err";
+                default: return "";
+            }
+        }
+
+        public static ControlState Controls(string state, bool canStartNow)
+        {
+            return new ControlState
+            {
+                CanStart = canStartNow && !IsActive(state),
+                CanPause = state == RunStates.Running,
+                CanResume = state == RunStates.Paused,
+                CanStop = state == RunStates.Running || state == RunStates.Pausing || state == RunStates.Paused,
+                CanChangeMode = !IsActive(state)
+            };
+        }
+
+        public static string StartButtonText(string mode)
+        {
+            return mode == "DRY" ? "Dry Run 시작" : mode == "RESUME" ? "재개 시작" : "이관 시작";
+        }
+
+        public static string ModeDescription(string mode)
+        {
+            switch (mode)
+            {
+                case "DRY": return "원본을 읽고 변환·매핑까지만 합니다. 대상에 쓰지 않고 예상 입력·갱신·거부 수를 보여 줍니다.";
+                case "RESUME": return "체크포인트가 있는 작업은 마지막 커밋 키 다음부터(WHERE 키 > :LAST_ID) 이어서 합니다.";
+                default: return "처음부터 실행합니다. MERGE는 이미 있는 행을 갱신하므로 다시 실행해도 중복이 생기지 않습니다.";
+            }
+        }
+
+        public static string PolicyText(string policy)
+        {
+            switch (policy)
+            {
+                case "CONTINUE": return "계속 + 오류 테이블";
+                case "STOP": return "오류 시 중지";
+                case "RETRY": return "3회 재시도";
+                default: return policy ?? "";
+            }
+        }
+
+        // ---------- 숫자 표기 ----------
+
+        public static string N(long value)
+        {
+            return value.ToString("N0", CultureInfo.GetCultureInfo("en-US"));
+        }
+
+        public static string Rate(double perSecond)
+        {
+            return perSecond <= 0 ? "—" : Math.Round(perSecond).ToString("N0", CultureInfo.GetCultureInfo("en-US"));
+        }
+
+        /// <summary>1234 → 00:20:34</summary>
+        public static string Duration(double seconds)
+        {
+            if (double.IsNaN(seconds) || double.IsInfinity(seconds))
+            {
+                return "—";
+            }
+
+            var s = (long)Math.Max(0, Math.Round(seconds));
+            return (s / 3600).ToString("00", CultureInfo.InvariantCulture) + ":" + ((s / 60) % 60).ToString("00", CultureInfo.InvariantCulture) + ":" + (s % 60).ToString("00", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>48,210,000 → 48.2M · 12,400 → 12K · 그 밖은 쉼표 숫자.</summary>
+        public static string Short(long v)
+        {
+            if (v >= 10000000)
+            {
+                return (v / 1e6).ToString("0.0", CultureInfo.InvariantCulture) + "M";
+            }
+
+            if (v >= 1000000)
+            {
+                return (v / 1e6).ToString("0.00", CultureInfo.InvariantCulture) + "M";
+            }
+
+            if (v >= 10000)
+            {
+                return Math.Round(v / 1e3).ToString("0", CultureInfo.InvariantCulture) + "K";
+            }
+
+            return N(v);
+        }
+
+        public static double Pct(long part, long total)
+        {
+            if (total <= 0)
+            {
+                return 0;
+            }
+
+            return Math.Min(100, Math.Max(0, part * 100.0 / total));
+        }
+
+        // ---------- 파이프라인 · 작업별 표 ----------
+
+        public static List<StageModel> Pipeline(RunSnapshot snap, int fetchSize, int commitSize, int workers, string modeLabel)
+        {
+            var running = snap != null && snap.Tasks != null && snap.Tasks.Any(t => t.Status == "run");
+            var cur = snap != null && snap.Tasks != null ? snap.Tasks.FirstOrDefault(t => t.Status == "run") ?? snap.Tasks.LastOrDefault(t => t.Status == "paused") : null;
+            var dry = snap != null && snap.Mode == "DRY";
+            var p = snap != null ? snap.Pipeline : null;
+            var rate = running && p != null ? Rate(p.ReadRowsPerSecond) + " 행/초" : "대기";
+            var fetches = cur != null && fetchSize > 0 ? (long)Math.Ceiling(cur.Read / (double)fetchSize) : 0;
+            var commits = snap != null && snap.Tasks != null ? snap.Tasks.Sum(t => (long)t.Commits) : 0;
+            var list = new List<StageModel>
+            {
+                new StageModel { Name = "원본 읽기", Metric = rate, Sub = cur != null ? "Fetch " + N(fetchSize) + " × " + N(fetches) + "회" : "Fetch " + N(fetchSize), Percent = running && p != null ? p.BufferPercent : 0, Active = running },
+                new StageModel { Name = "Transform", Metric = running ? rate : "대기", Sub = "Oracle SELECT 안에서", Percent = running ? 70 : 0, Active = running },
+                new StageModel { Name = "컬럼 매핑", Metric = running && cur != null ? "→ " + ShortLabel(cur.Label) : "대기", Sub = "별칭 → 대상 열", Percent = running ? 70 : 0, Active = running },
+                new StageModel
+                {
+                    Name = "배치 쓰기",
+                    Metric = running ? (dry ? "쓰기 없음(Dry)" : modeLabel ?? "") : "대기",
+                    Sub = "배열 " + N(commitSize) + " × " + (running && p != null ? p.WritingWorkers : workers),
+                    Percent = running && cur != null && commitSize > 0 ? Math.Min(100, cur.Pending * 100.0 / commitSize) : 0,
+                    Active = running && !dry
+                },
+                new StageModel { Name = "커밋", Metric = snap != null ? N(commits) + "회" : "—", Sub = dry ? "롤백(Dry)" : "COMMIT", Percent = 0, Active = false },
+                new StageModel
+                {
+                    Name = "체크포인트",
+                    Metric = cur != null && !string.IsNullOrEmpty(cur.Checkpoint) ? cur.Checkpoint : "—",
+                    Sub = dry ? "저장 안 함(Dry)" : "커밋마다 저장",
+                    Percent = 0,
+                    Active = false
+                }
+            };
+            return list;
+        }
+
+        private static string ShortLabel(string label)
+        {
+            if (string.IsNullOrEmpty(label))
+            {
+                return "";
+            }
+
+            var i = label.IndexOf("→", StringComparison.Ordinal);
+            return i >= 0 ? label.Substring(i + 1).Trim() : label;
+        }
+
+        public static TaskRowModel TaskRow(int index, TaskSnapshot t, long baseRows)
+        {
+            string text;
+            string kind;
+            switch (t.Status)
+            {
+                case "run": text = "실행 중"; kind = "run"; break;
+                case "paused": text = "일시 정지"; kind = "paused"; break;
+                case "done": text = "완료"; kind = "done"; break;
+                case "stopped": text = "중지"; kind = "stopped"; break;
+                case "failed": text = "실패"; kind = "failed"; break;
+                case "skipped": text = "건너뜀"; kind = "skipped"; break;
+                default: text = "대기"; kind = "wait"; break;
+            }
+
+            var total = baseRows + t.Total;
+            var written = baseRows + t.Written;
+            return new TaskRowModel
+            {
+                Index = index,
+                Label = t.Label,
+                StatusText = text,
+                StatusKind = kind,
+                Percent = Pct(written, total),
+                RowsText = N(written) + " / " + Short(total),
+                Inserted = N(t.Inserted),
+                Updated = N(t.Updated),
+                Rejected = N(t.Rejected),
+                HasRejects = t.Rejected > 0,
+                Checkpoint = string.IsNullOrEmpty(t.Checkpoint) ? "—" : t.Checkpoint,
+                Running = t.Status == "run"
+            };
+        }
+
+        // ---------- 로그 ----------
+
+        /// <summary>로그 거르기 분류: info · warn · error.</summary>
+        public static string LogClass(string tag)
+        {
+            if (tag == "WARN" || tag == "PAUSE")
+            {
+                return "warn";
+            }
+
+            if (tag == "ERROR" || tag == "STOP")
+            {
+                return "error";
+            }
+
+            return "info";
+        }
+
+        public static bool LogVisible(string tag, string filter)
+        {
+            return string.IsNullOrEmpty(filter) || filter == "all" || LogClass(tag) == filter;
+        }
+
+        // ---------- 체크포인트 카드 ----------
+
+        public static string CheckpointWhere(string column, string value)
+        {
+            if (string.IsNullOrEmpty(column))
+            {
+                return "";
+            }
+
+            decimal number;
+            var numeric = decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out number);
+            return "WHERE " + column + " > " + (numeric ? value : "'" + (value ?? "").Replace("'", "''") + "'") + "\nORDER BY " + column;
+        }
+
+        public static string CheckpointStatusText(string status)
+        {
+            return status == "done" ? "완료" : status == "running" ? "진행 중" : "중단됨";
+        }
+
+        // ---------- 시작 흐름 ----------
+
+        /// <summary>시작 버튼을 눌렀을 때 거쳐야 할 첫 번째 확인(없으면 Proceed). 사용자가 확인을 넘길 때마다 플래그를 켜고 다시 부른다.</summary>
+        public static StartGate NextStartGate(StartInputs i)
+        {
+            if (!i.HasMetadata)
+            {
+                return StartGate.NeedMetadata;
+            }
+
+            if (i.SelectedCount == 0)
+            {
+                return StartGate.NoSelection;
+            }
+
+            if (i.Mode == "RESUME" && i.SelectedWithCheckpoint == 0)
+            {
+                return StartGate.NoCheckpointToResume;
+            }
+
+            if (i.Mode == "DRY")
+            {
+                return StartGate.Proceed;
+            }
+
+            if (!i.HasValidation && !i.SkipValidateAsk)
+            {
+                return StartGate.AskValidateFirst;
+            }
+
+            if (i.HasValidation && i.Gate != null && i.Gate.Blocked)
+            {
+                return StartGate.Blocked;
+            }
+
+            if (i.HasValidation && i.ValidationStale && !i.StaleAccepted)
+            {
+                return StartGate.ConfirmStale;
+            }
+
+            if (i.DestructiveLabels != null && i.DestructiveLabels.Count > 0 && !i.DestructiveAccepted)
+            {
+                return StartGate.ConfirmDestructive;
+            }
+
+            return StartGate.Proceed;
+        }
+
+        public static bool IsDestructive(string writeMode)
+        {
+            return WriteModes.Of(writeMode).Destructive;
+        }
+
+        // ---------- 단계 막대 · 상태줄 ----------
+
+        public static StepInfo StepSummary(RunSummaryInput run)
+        {
+            if (run == null || run.State == RunStates.Idle)
+            {
+                if (run != null && run.ResumablePct >= 0)
+                {
+                    return new StepInfo { State = "warn", Summary = "재개 가능 · " + run.ResumablePct + "%" };
+                }
+
+                return new StepInfo { State = "", Summary = "대기" };
+            }
+
+            var pct = Math.Floor(run.Pct) + "%";
+            switch (run.State)
+            {
+                case RunStates.Starting:
+                case RunStates.Running:
+                case RunStates.Pausing:
+                    return new StepInfo { State = "busy", Summary = (run.Dry ? "Dry Run " : "실행 중 ") + pct };
+                case RunStates.Paused:
+                    return new StepInfo { State = "warn", Summary = "일시 정지 " + pct };
+                case RunStates.Done:
+                    return new StepInfo { State = "done", Summary = (run.Dry ? "Dry Run 완료" : "완료") + " · " + Duration(run.Elapsed) };
+                case RunStates.Stopped:
+                    return new StepInfo { State = "warn", Summary = "중지 · 재개 가능 " + pct };
+                case RunStates.Detached:
+                    return new StepInfo { State = "warn", Summary = "연결 끊김 · " + pct };
+                default:
+                    return new StepInfo { State = "error", Summary = "실패 · " + pct };
+            }
+        }
+
+        /// <summary>상태줄 실행 문구: "실행 중 · 850,000 / 1,240,325 행 (68%)"</summary>
+        public static string StatusBarText(string state, bool dry, long done, long total, double pct)
+        {
+            if (state == RunStates.Idle || state == null)
+            {
+                return "대기";
+            }
+
+            return StateText(state, dry) + " · " + N(done) + " / " + N(total) + " 행 (" + Math.Floor(pct) + "%)";
+        }
+    }
+}

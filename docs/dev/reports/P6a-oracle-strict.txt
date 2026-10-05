@@ -1,0 +1,8 @@
+# Migration Oracle IT 2026-10-04 10:04:32 · localhost:1521/xe
+[fixture] 준비 1117ms
+[engine] STRICT CONTINUE state=done · [START] 실행 R-20261004-100435 · 이관 실행 · 작업 1개
+Batch size=10,000 · Fetch=5,000 · Workers=1 · 오류 정책=계속 + 오류 테이블 · 체크포인트=대상 DB(MIG_CHECKPOINT) | [START] STRICT_SRC → TGT_STRICT  (INSERT_ONLY)
+범위: ID 순서로 100행 | [WARN] 거부 50행 → MIG_IT_TGT.ERR$_TGT_STRICT | [DONE] STRICT_SRC → TGT_STRICT  (00:00:00)
+Inserted : 50
+Updated  : 0
+Rejected : 50 → MIG_IT_TGT.ERR$_TGT_STRICT | [DONE] 전체 1개 작업 · 100행 · 00:00:00

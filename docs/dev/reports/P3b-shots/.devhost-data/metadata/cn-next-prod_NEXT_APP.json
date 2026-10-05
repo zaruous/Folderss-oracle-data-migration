@@ -1,0 +1,343 @@
+{
+  "schema": "NEXT_APP",
+  "tables": [
+    {
+      "name": "TB_MEMBER",
+      "kind": "TABLE",
+      "rows": 58225,
+      "avgRowLength": 110,
+      "comment": "회원(시범 이관분 58,225건 있음)",
+      "columns": [
+        {
+          "name": "MEMBER_ID",
+          "type": "NUMBER(18)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "회원 ID",
+          "stats": {}
+        },
+        {
+          "name": "MEMBER_NAME",
+          "type": "VARCHAR2(150)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "회원 이름",
+          "stats": {}
+        },
+        {
+          "name": "MOBILE_NO",
+          "type": "VARCHAR2(20)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "휴대폰 번호(숫자만)",
+          "stats": {}
+        },
+        {
+          "name": "USE_YN",
+          "type": "CHAR(1)",
+          "nullable": false,
+          "primaryKey": false,
+          "defaultValue": "'Y'",
+          "comment": "사용 여부",
+          "stats": {}
+        },
+        {
+          "name": "MEMBER_GRADE",
+          "type": "VARCHAR2(50)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "등급 이름",
+          "stats": {}
+        },
+        {
+          "name": "CREATED_AT",
+          "type": "TIMESTAMP",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "생성 일시",
+          "stats": {}
+        },
+        {
+          "name": "UPDATED_AT",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "수정 일시",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "TB_MEMBER_GRADE",
+      "kind": "TABLE",
+      "rows": 0,
+      "avgRowLength": 48,
+      "comment": "회원 등급",
+      "columns": [
+        {
+          "name": "GRADE_CODE",
+          "type": "VARCHAR2(10)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "GRADE_NAME",
+          "type": "VARCHAR2(100)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "DISPLAY_ORDER",
+          "type": "NUMBER(5)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "TB_SALES_ORDER",
+      "kind": "TABLE",
+      "rows": 0,
+      "avgRowLength": 90,
+      "comment": "판매 주문",
+      "columns": [
+        {
+          "name": "ORDER_NO",
+          "type": "VARCHAR2(30)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "MEMBER_ID",
+          "type": "NUMBER(18)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "ORDERED_AT",
+          "type": "TIMESTAMP",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "TOTAL_AMT",
+          "type": "NUMBER(13,2)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "ORDER_STATUS",
+          "type": "VARCHAR2(10)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "CHANNEL_CD",
+          "type": "VARCHAR2(10)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "판매 채널(신규 컬럼)",
+          "stats": {}
+        },
+        {
+          "name": "CREATED_AT",
+          "type": "TIMESTAMP",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "FK_SALES_ORDER_MEMBER",
+          "columns": [
+            "MEMBER_ID"
+          ],
+          "refTable": "TB_MEMBER"
+        }
+      ],
+      "isVirtual": false
+    },
+    {
+      "name": "TB_SALES_ORDER_ITEM",
+      "kind": "TABLE",
+      "rows": 0,
+      "avgRowLength": 60,
+      "comment": "판매 주문 품목",
+      "columns": [
+        {
+          "name": "ORDER_NO",
+          "type": "VARCHAR2(30)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "LINE_NO",
+          "type": "NUMBER(5)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "PRODUCT_ID",
+          "type": "VARCHAR2(30)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "QUANTITY",
+          "type": "NUMBER(9)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "UNIT_PRICE",
+          "type": "NUMBER(14,2)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [
+        {
+          "name": "FK_ORDER_ITEM_ORDER",
+          "columns": [
+            "ORDER_NO"
+          ],
+          "refTable": "TB_SALES_ORDER"
+        },
+        {
+          "name": "FK_ORDER_ITEM_PRODUCT",
+          "columns": [
+            "PRODUCT_ID"
+          ],
+          "refTable": "TB_PRODUCT"
+        }
+      ],
+      "isVirtual": false
+    },
+    {
+      "name": "TB_PRODUCT",
+      "kind": "TABLE",
+      "rows": 0,
+      "avgRowLength": 140,
+      "comment": "상품",
+      "columns": [
+        {
+          "name": "PRODUCT_ID",
+          "type": "VARCHAR2(30)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "PRODUCT_NAME",
+          "type": "VARCHAR2(300)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "CATEGORY_ID",
+          "type": "VARCHAR2(20)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "LIST_PRICE",
+          "type": "NUMBER(14,2)",
+          "nullable": true,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "USE_YN",
+          "type": "CHAR(1)",
+          "nullable": false,
+          "primaryKey": false,
+          "defaultValue": "'Y'",
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    },
+    {
+      "name": "TB_COMMON_CODE",
+      "kind": "TABLE",
+      "rows": 0,
+      "avgRowLength": 70,
+      "comment": "공통 코드",
+      "columns": [
+        {
+          "name": "GROUP_CODE",
+          "type": "VARCHAR2(30)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "CODE",
+          "type": "VARCHAR2(30)",
+          "nullable": false,
+          "primaryKey": true,
+          "comment": "",
+          "stats": {}
+        },
+        {
+          "name": "CODE_NAME",
+          "type": "VARCHAR2(200)",
+          "nullable": false,
+          "primaryKey": false,
+          "comment": "",
+          "stats": {}
+        }
+      ],
+      "foreignKeys": [],
+      "isVirtual": false
+    }
+  ],
+  "tablespace": {
+    "name": "NEXT_DATA",
+    "freeGb": 182.4
+  },
+  "loadedAt": "0001-01-01T00:00:00",
+  "elapsedMs": 0,
+  "cached": false
+}

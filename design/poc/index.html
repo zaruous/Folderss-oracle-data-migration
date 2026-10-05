@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko" data-theme="black">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Migration Studio</title>
+  <meta name="description" content="Folderss 플러그인 Oracle Migration Studio 화면 설계 POC (Mock 데이터)">
+  <link rel="stylesheet" href="css/studio.css">
+</head>
+<body>
+  <!--
+    Folderss 플러그인 팝업 창 안의 내용과 같은 구성:
+    메뉴 막대 → 아이콘 막대 → [단계 막대 | 화면] → 상태줄
+  -->
+  <div class="app" id="app">
+    <header>
+      <nav class="menubar" id="menubar" aria-label="Migration Studio 메뉴"></nav>
+      <div class="iconbar" id="iconbar" role="toolbar" aria-label="빠른 실행 아이콘"></div>
+    </header>
+    <div class="body">
+      <aside class="sidebar" id="sidebar" aria-label="이관 단계"></aside>
+      <main class="page" id="page" tabindex="-1"></main>
+    </div>
+    <footer class="statusbar" id="statusbar"></footer>
+  </div>
+  <div id="overlay"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <!-- 화면 공용 -->
+  <script src="js/ui/dom.js"></script>
+  <script src="js/ui/components.js"></script>
+  <!-- 백엔드(실제 구현에서 C# 서비스로 옮길 부분) -->
+  <script src="js/backend/mock-metadata.js"></script>
+  <script src="js/backend/expression.js"></script>
+  <script src="js/backend/adapters.js"></script>
+  <script src="js/backend/mapping.js"></script>
+  <script src="js/backend/sqlgen.js"></script>
+  <script src="js/backend/sql-mapping.js"></script>
+  <script src="js/backend/job.js"></script>
+  <script src="js/backend/settings.js"></script>
+  <script src="js/backend/validation.js"></script>
+  <script src="js/backend/engine.js"></script>
+  <!-- 상태·화면 -->
+  <script src="js/app/store.js"></script>
+  <script>window.MS.pages = {};</script>
+  <script src="js/pages/connection.js"></script>
+  <script src="js/pages/tables.js"></script>
+  <script src="js/pages/columns.js"></script>
+  <script src="js/pages/sql-editor.js"></script>
+  <script src="js/pages/validation.js"></script>
+  <script src="js/pages/run.js"></script>
+  <script src="js/pages/settings.js"></script>
+  <script src="js/app/app.js"></script>
+</body>
+</html>

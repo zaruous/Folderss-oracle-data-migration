@@ -1,0 +1,27 @@
+# Migration Oracle IT 2026-10-04 10:02:55 · localhost:1521/xe
+[fixture] 준비 1086ms
+[engine] TARGET stop=80000, resume=200000
+[engine] LOCAL stop=80000, resume=200000
+[engine] source sql=SELECT
+    ID AS ID,
+    NAME AS NAME,
+    CREATED_AT AS CREATED_AT,
+    EVENT_TS AS EVENT_TS,
+    AMOUNT AS AMOUNT,
+    NOTE AS NOTE,
+    ID AS MIG_CP_HIDDEN
+FROM MIG_IT_SRC.BIG_SRC
+WHERE ID >= :RANGE_FROM
+  AND (:LAST_ID IS NULL OR ID > :LAST_ID)
+  AND ID <= :RANGE_TO
+ORDER BY ID
+[engine] source diagnostic rows=1
+[engine] engine state=done · [START] 실행 R-20261004-100320 · 이관 실행 · 작업 1개
+Batch size=10,000 · Fetch=5,000 · Workers=4 · 오류 정책=3회 재시도 · 체크포인트=대상 DB(MIG_CHECKPOINT) | [START] BIG_SRC → BIG_TGT  (INSERT_ONLY)
+범위: ID 순서로 200,000행 | [INFO] Committed 20,000 rows · 체크포인트 ID = 1 | [INFO] Committed 40,000 rows · 체크포인트 ID = 10000 | [INFO] Committed 60,000 rows · 체크포인트 ID = 10000 | [INFO] Committed 80,000 rows · 체크포인트 ID = 10000 | [INFO] Committed 100,000 rows · 체크포인트 ID = 20000 | [INFO] Committed 120,000 rows · 체크포인트 ID = 30000 | [INFO] Committed 140,000 rows · 체크포인트 ID = 30000 | [INFO] Committed 160,000 rows · 체크포인트 ID = 40000 | [INFO] Committed 180,000 rows · 체크포인트 ID = 40000 | [DONE] BIG_SRC → BIG_TGT  (00:00:06)
+Inserted : 200,000
+Updated  : 0
+Rejected : 0 | [DONE] 전체 1개 작업 · 200,000행 · 00:00:06
+[engine] INSERT_ONLY rows=200000, elapsed=6.862s, rate=29146 rows/s, GC delta=51759528 bytes, GC peak delta=71484560 bytes, working-set delta=58765312 bytes, working-set peak delta=76656640 bytes
+[engine] MERGE rows=200000, elapsed=6.088s, Updated=200000
+[fixture] ORACLE_IT_KEEP=1 — 사용자 유지

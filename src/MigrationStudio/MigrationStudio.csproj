@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>disable</Nullable>
+    <!-- Windows가 아닌 곳(CI 등)에서도 컴파일만은 되게 한다. 실행은 Windows에서만 -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- publish할 때 NuGet 패키지의 Windows용 DLL(runtimes/win/...)을 골라 출력 폴더에 펼친다. 런타임은 Folderss 것을 쓴다 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DevHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 계약 DLL은 Folderss 본체의 것을 쓰므로 zip에 넣지 않는다 (Private=false) -->
+    <ProjectReference Include="..\..\contract\Folderss.PluginContract\Folderss.PluginContract.csproj" Private="false" />
+    <ProjectReference Include="..\MigrationStudio.Core\MigrationStudio.Core.csproj" />
+    <!-- 에이전트는 참조하지 않고(출력 복사 안 함) 복원·빌드 순서만 맞춘다. zip에는 PackPlugin이 따로 publish해 넣는다 -->
+    <ProjectReference Include="..\MigrationAgent\MigrationAgent.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <!--
+    dotnet publish 할 때마다 플러그인 zip을 만든다: bin\<구성>\net8.0-windows\win-x64\<AssemblyName>.zip
+      zip 루트  : plugin.json, 플러그인 DLL, .deps.json, Core·NuGet DLL (Folderss가 .deps.json으로 찾음)
+      zip\agent : MigrationAgent.exe와 그 의존 DLL — 이관을 실행하는 하위 프로세스(플러그인 .deps.json에는 없으므로 Folderss가 로드하지 않음)
+  -->
+  <Target Name="PackPlugin" AfterTargets="Publish">
+    <PropertyGroup>
+      <PluginStage>$(IntermediateOutputPath)plugin-stage\</PluginStage>
+      <AgentStage>$(PluginStage)agent\</AgentStage>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- publish 폴더를 통째로 묶지 않고 이번 publish 대상만 묶는다 (지운 패키지의 DLL이 남아 섞이지 않게) -->
+      <PluginFiles Include="@(ResolvedFileToPublish)" Condition="'%(Extension)' != '.pdb'" />
+    </ItemGroup>
+    <RemoveDir Directories="$(PluginStage)" />
+    <Copy SourceFiles="@(PluginFiles)" DestinationFiles="@(PluginFiles->'$(PluginStage)%(RelativePath)')" />
+    <Copy SourceFiles="plugin.json;$(PublishDir)$(TargetFileName);$(PublishDir)$(ProjectDepsFileName)" DestinationFolder="$(PluginStage)" />
+    <MSBuild Projects="..\MigrationAgent\MigrationAgent.csproj" Targets="Publish" Properties="Configuration=$(Configuration);PublishDir=$(MSBuildProjectDirectory)\$(AgentStage)" />
+    <ItemGroup>
+      <AgentPdb Include="$(AgentStage)*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(AgentPdb)" />
+    <ZipDirectory SourceDirectory="$(PluginStage)" DestinationFile="$(OutDir)$(AssemblyName).zip" Overwrite="true" />
+    <Message Importance="high" Text="Folderss 플러그인: $(OutDir)$(AssemblyName).zip" />
+  </Target>
+
+</Project>

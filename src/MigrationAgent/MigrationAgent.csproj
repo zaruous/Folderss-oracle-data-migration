@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    이관을 실행하는 하위 프로세스. 플러그인이 DataDirectory\agent\<버전>\로 복사한 뒤 실행하고 이름 있는 파이프로 주고받는다.
+    Folderss와 같은 .NET 8 런타임을 쓰는 프레임워크 의존 실행 파일(apphost)이다.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <UseAppHost>true</UseAppHost>
+    <AssemblyName>MigrationAgent</AssemblyName>
+    <RootNamespace>MigrationAgent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MigrationStudio.Core\MigrationStudio.Core.csproj" />
+  </ItemGroup>
+
+</Project>
