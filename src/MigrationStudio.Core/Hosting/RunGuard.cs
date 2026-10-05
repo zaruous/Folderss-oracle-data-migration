@@ -23,9 +23,27 @@ namespace MigrationStudio.Core.Hosting
             _maxConcurrent = Math.Max(1, maxConcurrent);
         }
 
+        /// <summary>
+        /// 동시 실행 한도에 세는 실행인가 — 끝난(done·stopped·failed·crashed) 실행은 에이전트가 결과 재접속을 위해
+        /// --idle-exit초 더 살아 있어도 세지 않는다. 실제 Folderss에서 실패한 Dry Run 뒤 10분간 "동시 실행 한도(1)"로 막히던 원인.
+        /// </summary>
+        public static bool CountsTowardLimit(AgentRunInfo run)
+        {
+            if (run == null)
+            {
+                return false;
+            }
+
+            var state = run.State ?? "";
+            return !(string.Equals(state, "done", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(state, "stopped", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(state, "failed", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(state, "crashed", StringComparison.OrdinalIgnoreCase));
+        }
+
         public void Acquire()
         {
-            var alive = AgentRuns.ListAlive(_dataDirectory);
+            var alive = AgentRuns.ListAlive(_dataDirectory).Where(CountsTowardLimit).ToList();
             if (alive.Count >= _maxConcurrent)
             {
                 throw new ConcurrencyLimitException(_maxConcurrent);
@@ -44,7 +62,7 @@ namespace MigrationStudio.Core.Hosting
                 var waited = _mutex.WaitOne(TimeSpan.FromMilliseconds(50));
                 if (!waited)
                 {
-                    alive = AgentRuns.ListAlive(_dataDirectory);
+                    alive = AgentRuns.ListAlive(_dataDirectory).Where(CountsTowardLimit).ToList();
                     sameJob = alive.FirstOrDefault(r => string.Equals(r.JobName, _jobName, StringComparison.Ordinal));
                     if (sameJob != null)
                     {

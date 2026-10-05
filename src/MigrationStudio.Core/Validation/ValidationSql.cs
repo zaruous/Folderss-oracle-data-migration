@@ -141,16 +141,31 @@ namespace MigrationStudio.Core.Validation
                 + "    SELECT 1 FROM " + schema + "." + parent + " C WHERE " + join + "\n)";
         }
 
+        /// <summary>
+        /// 기본 테이블스페이스의 현재 여유(USER_FREE_SPACE)와 남은 할당량(USER_TS_QUOTAS). 소수 셋째 자리까지 — 첫째 자리로 반올림하면
+        /// 작은 DB(예: XE의 USERS 40MB 여유)가 0.0이 되어 "여유 0 GB"로 보인다. 데이터 파일 자동 확장은 <see cref="TablespaceAutoExtend"/>.
+        /// </summary>
         public static string TablespaceFree()
         {
             return "SELECT U.DEFAULT_TABLESPACE,"
-                + " (SELECT ROUND(SUM(F.BYTES) / 1024 / 1024 / 1024, 1)"
+                + " (SELECT ROUND(SUM(F.BYTES) / 1024 / 1024 / 1024, 3)"
                 + "    FROM USER_FREE_SPACE F"
                 + "   WHERE F.TABLESPACE_NAME = U.DEFAULT_TABLESPACE) AS FREE_GB,"
-                + " (SELECT DECODE(Q.MAX_BYTES, -1, NULL, ROUND((Q.MAX_BYTES - Q.BYTES) / 1024 / 1024 / 1024, 1))"
+                + " (SELECT DECODE(Q.MAX_BYTES, -1, NULL, ROUND((Q.MAX_BYTES - Q.BYTES) / 1024 / 1024 / 1024, 3))"
                 + "    FROM USER_TS_QUOTAS Q"
                 + "   WHERE Q.TABLESPACE_NAME = U.DEFAULT_TABLESPACE) AS QUOTA_LEFT_GB"
                 + " FROM USER_USERS U";
+        }
+
+        /// <summary>
+        /// 데이터 파일 자동 확장으로 더 커질 수 있는 양(GB). DBA_DATA_FILES는 권한이 있어야 읽히므로(없으면 ORA-00942) 실패하면 모른다고 다룬다.
+        /// </summary>
+        public static string TablespaceAutoExtend()
+        {
+            return "SELECT ROUND(NVL(SUM(CASE WHEN D.AUTOEXTENSIBLE = 'YES' AND D.MAXBYTES > D.BYTES THEN D.MAXBYTES - D.BYTES ELSE 0 END), 0)"
+                + " / 1024 / 1024 / 1024, 3) AS AUTOEXTEND_GB"
+                + " FROM DBA_DATA_FILES D, USER_USERS U"
+                + " WHERE D.TABLESPACE_NAME = U.DEFAULT_TABLESPACE";
         }
 
         public static string ErrorTableExists(string owner, string name)

@@ -661,7 +661,25 @@ namespace MigrationStudio.Core.Adapters.Oracle
                 {
                     freeCmd.Parameters.Add("TS", tsName);
                     var freeBytes = Convert.ToDecimal(freeCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
-                    info.FreeGb = Math.Round((double)(freeBytes / 1024m / 1024m / 1024m), 1, MidpointRounding.AwayFromZero);
+                    // 소수 셋째 자리까지 — 첫째 자리면 XE의 USERS(여유 27MB)가 0.0이 되어 검증이 "여유 0 GB"라고 한다
+                    info.FreeGb = Math.Round((double)(freeBytes / 1024m / 1024m / 1024m), 3, MidpointRounding.AwayFromZero);
+                }
+
+                // 데이터 파일 자동 확장 여유 — DBA_DATA_FILES는 권한이 있어야 읽힌다(없으면 ORA-00942 → 모름으로 둔다)
+                try
+                {
+                    using (var autoCmd = OracleConnectionHelper.CreateCommand(connection,
+                        "SELECT NVL(SUM(CASE WHEN AUTOEXTENSIBLE = 'YES' AND MAXBYTES > BYTES THEN MAXBYTES - BYTES ELSE 0 END), 0)"
+                        + " FROM DBA_DATA_FILES WHERE TABLESPACE_NAME = :TS", cancellationToken))
+                    {
+                        autoCmd.Parameters.Add("TS", tsName);
+                        var autoBytes = Convert.ToDecimal(autoCmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+                        info.AutoExtendGb = Math.Round((double)(autoBytes / 1024m / 1024m / 1024m), 3, MidpointRounding.AwayFromZero);
+                    }
+                }
+                catch (OracleException)
+                {
+                    info.AutoExtendGb = null;
                 }
 
                 using (var quotaCmd = OracleConnectionHelper.CreateCommand(connection,

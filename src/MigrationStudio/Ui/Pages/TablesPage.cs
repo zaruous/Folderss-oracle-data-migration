@@ -17,6 +17,21 @@ namespace MigrationStudio.Ui.Pages
     {
         private readonly IMappingUiHost _host;
         private readonly StackPanel _bodyPanel = new StackPanel();
+        private SplitPane _split;
+        private ScrollViewer _topScroll;
+
+        /// <summary>위(매핑 목록)는 스크롤, 아래(스키마 탐색)는 분할선으로 높이를 나눈다. 한 번만 만들고 내용만 바꾼다.</summary>
+        private void EnsureSplit()
+        {
+            if (_split != null)
+            {
+                return;
+            }
+
+            _topScroll = new ScrollViewer { Content = _bodyPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            _split = new SplitPane(_host.State.Ui.TablesSplit, r => _host.State.Ui.TablesSplit = r) { Top = _topScroll };
+            SetBodyFill(_split);
+        }
 
         public TablesPage(IMappingUiHost host)
         {
@@ -35,7 +50,7 @@ namespace MigrationStudio.Ui.Pages
         {
             RebuildHeaderActions();
             _bodyPanel.Children.Clear();
-            SetBody(_bodyPanel);
+            EnsureSplit();
 
             if (!_host.Operations.HasMetadata())
             {
@@ -44,6 +59,8 @@ namespace MigrationStudio.Ui.Pages
                 go.Click += (s, e) => _host.GoToStep(0);
                 empty.Children.Add(go);
                 _bodyPanel.Children.Add(empty);
+                _split.Bottom = null;
+                _split.BottomVisible = false;
                 SetFooterHint("");
                 return;
             }
@@ -95,9 +112,10 @@ namespace MigrationStudio.Ui.Pages
                 Theme.Secondary("대상을 바꾸면 컬럼을 다시 자동 매핑합니다 · SQL 원본은 편집기에서 검증하세요"));
 
             var browse = BuildBrowseCard();
-            gridCard.Margin = new Thickness(0, 0, 0, 12);
+            gridCard.Margin = new Thickness(0, 0, 0, 4);
             _bodyPanel.Children.Add(gridCard);
-            _bodyPanel.Children.Add(browse);
+            _split.Bottom = browse;
+            _split.BottomVisible = true;
 
             var sel = _host.State.Ui.SelMapping != null ? _host.State.Mapping(_host.State.Ui.SelMapping) : null;
             SetFooterHint(sel != null ? "고른 매핑: " + sel.Label : "");
@@ -322,7 +340,7 @@ namespace MigrationStudio.Ui.Pages
 
         private UIElement BrowseList(string title, List<SchemaBrowseLine> lines)
         {
-            var scroll = new ScrollViewer { MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             var stack = new StackPanel { Margin = new Thickness(0, 0, 4, 0) };
             stack.Children.Add(Kit.SectionLabel(title));
             foreach (var line in lines)

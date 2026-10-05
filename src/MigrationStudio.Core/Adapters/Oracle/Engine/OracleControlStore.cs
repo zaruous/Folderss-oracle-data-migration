@@ -48,8 +48,10 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
                 {
                     await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
                     if (await ExistsAsync(connection, item.ErrorTable, cancellationToken).ConfigureAwait(false)) return;
+                    // skip_unsupported: LOB·LONG·객체 열은 오류 테이블에 담을 수 없다 — 기본값(FALSE)이면 CLOB 열 하나 때문에
+                    // ORA-20069 "Unsupported column type(s) found"로 실행 자체가 막힌다(실제 Oracle에서 BIG_SRC.NOTE CLOB). 그 열만 빼고 만든다.
                     using (var command = OracleConnectionHelper.CreateCommand(connection,
-                        "BEGIN DBMS_ERRLOG.CREATE_ERROR_LOG(dml_table_name=>:TABLE_NAME,err_log_table_name=>:ERROR_NAME,err_log_table_owner=>:OWNER); END;", cancellationToken))
+                        "BEGIN DBMS_ERRLOG.CREATE_ERROR_LOG(dml_table_name=>:TABLE_NAME,err_log_table_name=>:ERROR_NAME,err_log_table_owner=>:OWNER,skip_unsupported=>TRUE); END;", cancellationToken))
                     {
                         command.Parameters.Add("TABLE_NAME", item.Mapping.Target);
                         command.Parameters.Add("ERROR_NAME", item.ErrorTable);
@@ -64,7 +66,14 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException("대상 스키마에 " + item.ErrorTable + " 오류 테이블을 만들 권한이 없습니다. DBA에게 DBMS_ERRLOG 실행 권한과 테이블 생성 권한을 요청하세요.", ex);
+                // 권한 문제(ORA-01031·ORA-00942·ORA-01950)일 때만 권한 안내, 그 밖에는 Oracle이 말한 그대로 — 원인이 다른데 "권한"이라고 하면 DBA만 헛걸음한다
+                var oracle = ex as OracleException;
+                var permission = oracle != null && (oracle.Number == 1031 || oracle.Number == 942 || oracle.Number == 1950 || oracle.Number == 6550);
+                var head = "대상 스키마에 " + item.ErrorTable + " 오류 테이블을 만들지 못했습니다";
+                var hint = permission
+                    ? " — DBA에게 DBMS_ERRLOG 실행 권한과 테이블 생성 권한을 요청하세요."
+                    : " — 오류 정책을 '오류 시 중지'로 바꾸거나 DBA가 오류 테이블을 미리 만들어 두세요.";
+                throw new InvalidOperationException(head + hint + " (" + ex.Message.Trim() + ")", ex);
             }
         }
 

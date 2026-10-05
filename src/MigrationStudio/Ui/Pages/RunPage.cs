@@ -8,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Media;
 using MigrationStudio.Core.Engine;
+using MigrationStudio.Core.Hosting;
 using MigrationStudio.Core.Model;
 using MigrationStudio.Core.Validation;
 using MigrationStudio.Logic;
@@ -57,7 +58,10 @@ namespace MigrationStudio.Ui.Pages
             _presenter = presenter;
             _serviceFactory = serviceFactory;
             SetStep(4, Labels.StepTitles[4], "작업을 골라 Dry Run으로 확인한 뒤 이관합니다. 일시정지는 커밋 경계에서 멈추고, 중지하면 진행 중 배치를 롤백한 뒤 마지막 커밋 키를 체크포인트로 남깁니다.");
-            SetBody(_bodyPanel);
+            // 위(작업 선택·실행 제어·진행)는 스크롤, 아래(로그·체크포인트)는 분할선으로 높이를 나눈다 — 창 높이를 채우는 본문
+            _topScroll = new ScrollViewer { Content = _bodyPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            _split = new SplitPane(State.Ui.RunSplit, r => State.Ui.RunSplit = r) { Top = _topScroll };
+            SetBodyFill(_split);
             SetFooterHint("F5 시작 · 일시정지 중 F5 = 이어서");
             _presenter.StateChanged += () => Rebuild();
             _presenter.Render += OnRender;
@@ -78,10 +82,17 @@ namespace MigrationStudio.Ui.Pages
             var all = State.Job.Mappings ?? new List<Mapping>();
             if (ui.RunSelected == null)
             {
-                ui.RunSelected = new HashSet<string>(all.Where(m => m.Use).Select(m => m.Id), StringComparer.Ordinal);
+                ui.RunSelected = new HashSet<string>(StringComparer.Ordinal);
+                ui.RunKnown = new HashSet<string>(StringComparer.Ordinal);
             }
 
-            ui.RunSelected.IntersectWith(all.Select(m => m.Id));
+            if (ui.RunKnown == null)
+            {
+                ui.RunKnown = new HashSet<string>(ui.RunSelected, StringComparer.Ordinal);
+            }
+
+            // 새 매핑은 기본으로 고르고 사라진 매핑은 뺀다 — 실행 화면이 매핑보다 먼저 만들어져도(창을 열 때 다시 붙기 검사) 선택이 비지 않게
+            RunLogic.SyncSelection(ui.RunSelected, ui.RunKnown, all);
             return ui.RunSelected;
         }
 
@@ -102,12 +113,117 @@ namespace MigrationStudio.Ui.Pages
             }
         }
 
+        // ---------- 다시 붙기 ----------
+
+        private List<AgentRunInfo> _aliveRuns = new List<AgentRunInfo>();
+        private readonly SplitPane _split;
+        private readonly ScrollViewer _topScroll;
+
+        /// <summary>
+        /// 창을 열 때 한 번: 살아 있는(끝나지 않은) 에이전트가 있으면 같은 작업은 바로 다시 붙고, 다른 작업은 실행 화면에 안내 상자를 띄운다.
+        /// 에이전트는 창과 무관하게 돌기 때문에 이것이 없으면 "창을 닫아도 계속"이 반쪽이 된다.
+        /// </summary>
+        public void CheckAliveRuns()
+        {
+            if (State.Run != null && RunLogic.IsActive(CurrentState))
+            {
+                return;
+            }
+
+            List<AgentRunInfo> all;
+            try
+            {
+                all = _serviceFactory().ListAlive();
+                _aliveRuns = RunLogic.AliveForReattach(all);
+            }
+            catch (Exception ex)
+            {
+                UiTrace.Write("reattach", "ListAlive 실패: " + ex.Message);
+                _aliveRuns = new List<AgentRunInfo>();
+                return;
+            }
+
+            UiTrace.Write("reattach", "살아 있는 에이전트 " + (all != null ? all.Count : 0) + "개, 끝나지 않은 것 " + _aliveRuns.Count + "개"
+                + (all != null && all.Count > 0 ? " — " + string.Join(", ", all.Select(r => r.RunId + "(" + r.State + ", pid " + r.Pid + ", " + r.JobName + ")")) : ""));
+            if (_aliveRuns.Count == 0)
+            {
+                return;
+            }
+
+            var mine = RunLogic.PickReattach(_aliveRuns, State.Job != null ? State.Job.JobName : null);
+            if (mine != null)
+            {
+                UiTrace.Write("reattach", "같은 작업 '" + State.Job.JobName + "' → " + mine.RunId + "에 바로 다시 붙음");
+                Reattach(mine);
+                return;
+            }
+
+            UiTrace.Write("reattach", "같은 작업 없음(현재 '" + (State.Job != null ? State.Job.JobName : "") + "') → 실행 화면에 안내");
+
+            Rebuild();
+            Kit.Toast(_host.Owner, "진행 중인 실행 " + _aliveRuns.Count + "개 — 실행 화면에서 다시 붙을 수 있습니다", "warn");
+        }
+
+        private async void Reattach(AgentRunInfo run)
+        {
+            var st = State.Job.Strategy ?? new MigrationStrategy();
+            var view = _presenter.Begin("EXECUTE", st.FetchSize, st.CommitSize, st.Workers);
+            view.Stage = "실행 " + run.RunId + "에 다시 붙는 중…";
+            Rebuild();
+            try
+            {
+                var client = await _serviceFactory().AttachAsync(run, CancellationToken.None).ConfigureAwait(true);
+                _presenter.Attach(client, "EXECUTE", true);
+                _aliveRuns = new List<AgentRunInfo>();
+                _host.GoToStep(4);
+                UiTrace.Write("reattach", run.RunId + " 다시 붙음(pid " + client.Pid + ")");
+                Kit.Toast(_host.Owner, "실행 " + run.RunId + "에 다시 붙었습니다", "ok");
+            }
+            catch (Exception ex)
+            {
+                UiTrace.Write("reattach", run.RunId + " 다시 붙기 실패: " + ex);
+                _presenter.StartFailed("다시 붙지 못했습니다: " + ex.Message);
+            }
+        }
+
+        private UIElement BuildReattachNotice()
+        {
+            var runs = RunLogic.AliveForReattach(_aliveRuns);
+            if (runs.Count == 0 || (State.Run != null && RunLogic.IsActive(CurrentState)))
+            {
+                return null;
+            }
+
+            var panel = new StackPanel();
+            var notice = Kit.Notice("warn", new List<Inline> { new Run(RunLogic.ReattachNoticeText(runs)) });
+            panel.Children.Add(notice);
+            var buttons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+            foreach (var run in runs)
+            {
+                var target = run;
+                var btn = Kit.Button("다시 붙기 · " + run.RunId, Icons.Link);
+                btn.Margin = new Thickness(0, 0, 6, 0);
+                btn.Click += (s, e) => Reattach(target);
+                buttons.Children.Add(btn);
+            }
+
+            panel.Children.Add(buttons);
+            return panel;
+        }
+
         private void Rebuild()
         {
             _stats.Clear();
             _stages.Clear();
             _logShown = 0;
             _bodyPanel.Children.Clear();
+            var reattach = BuildReattachNotice();
+            if (reattach != null)
+            {
+                reattach.SetValue(MarginProperty, new Thickness(0, 0, 0, 14));
+                _bodyPanel.Children.Add(reattach);
+            }
+
             var notice = BuildResultNotice();
             if (notice != null)
             {
@@ -140,10 +256,11 @@ namespace MigrationStudio.Ui.Pages
             progress.Margin = new Thickness(0, 0, 0, 14);
             _bodyPanel.Children.Add(progress);
 
-            var bottom = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            // 아래 패널: 로그 카드가 분할선 아래의 높이를 채우고(별 행), 체크포인트는 옆(넓을 때) 또는 아래(좁을 때)
+            var bottom = new Grid();
             bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
-            bottom.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            bottom.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             bottom.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var log = BuildLogCard();
             _cpHost = new Border();
@@ -159,8 +276,9 @@ namespace MigrationStudio.Ui.Pages
                 Grid.SetRow(_cpHost, stacked ? 1 : 0);
                 Grid.SetColumnSpan(_cpHost, stacked ? 2 : 1);
                 Grid.SetColumnSpan(log, stacked ? 2 : 1);
+                _cpHost.MaxHeight = stacked ? 240 : double.PositiveInfinity;
             };
-            _bodyPanel.Children.Add(bottom);
+            _split.Bottom = bottom;
 
             DrawCheckpoints();
             UpdateLive(true);
@@ -367,8 +485,15 @@ namespace MigrationStudio.Ui.Pages
                 State.MarkUiChanged();
                 Rebuild();
             };
-            var foot = Theme.Secondary("실행 순서: 대상 외래 키 기준 부모 → 자식(예: TB_MEMBER 다음 TB_SALES_ORDER)");
+            // POC의 보기 문장 대신 실제로 돌 순서 — 고른 작업을 대상 외래 키 기준(부모 → 자식)으로 정렬한 것
+            var picked = ordered.Where(m => selection.Contains(m.Id)).ToList();
+            var orderText = picked.Count == 0
+                ? "실행 순서: 고른 작업이 없습니다"
+                : "실행 순서(대상 외래 키 기준 부모 → 자식): " + string.Join(" → ", picked.Select(m => m.Target));
+            var foot = Theme.Secondary(orderText);
             foot.FontSize = 12;
+            foot.TextTrimming = TextTrimming.CharacterEllipsis;
+            foot.ToolTip = orderText;
             var card = Kit.Card(Icons.List + "  작업 선택 · " + selection.Count + "개 · " + RunLogic.N(total) + " 행", all, body, foot);
             return card;
         }
@@ -593,7 +718,6 @@ namespace MigrationStudio.Ui.Pages
             _logPanel = new StackPanel();
             _logScroll = new ScrollViewer
             {
-                MaxHeight = 280,
                 MinHeight = 120,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
@@ -625,6 +749,7 @@ namespace MigrationStudio.Ui.Pages
             tools.Children.Add(filter);
             tools.Children.Add(copy);
             tools.Children.Add(clear);
+            // 로그는 분할선 아래 높이를 채운다(카드 본문이 DockPanel의 마지막 자식이라 늘어난다) — 높이는 분할선으로 조절
             var host = new Border { Padding = new Thickness(0), Child = _logScroll };
             return Kit.Card(Icons.List + "  Migration Log", tools, host, null);
         }
@@ -1028,7 +1153,8 @@ namespace MigrationStudio.Ui.Pages
                 body.Children.Add(item);
             }
 
-            _cpHost.Child = Kit.Card(Icons.Checklist + "  체크포인트 · 커밋마다 저장", null, new ScrollViewer { MaxHeight = 320, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = body }, null);
+            var cpScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = body };
+            _cpHost.Child = Kit.Card(Icons.Checklist + "  체크포인트 · 커밋마다 저장", null, cpScroll, null);
         }
 
         // ================= 시작 흐름 =================
@@ -1045,6 +1171,7 @@ namespace MigrationStudio.Ui.Pages
 
             if (RunLogic.IsActive(state))
             {
+                UiTrace.Write("run", "시작 무시 — 이미 " + state);
                 return;
             }
 
@@ -1071,6 +1198,7 @@ namespace MigrationStudio.Ui.Pages
             for (var guard = 0; guard < 8; guard++)
             {
                 var gate = RunLogic.NextStartGate(inputs);
+                UiTrace.Write("run", "시작 관문 " + gate + " · 모드 " + mode + " · 선택 " + sel.Count + " · 검증 " + (inputs.HasValidation ? (inputs.ValidationStale ? "있음(바뀜)" : "있음") : "없음"));
                 switch (gate)
                 {
                     case StartGate.NeedMetadata:
@@ -1165,14 +1293,17 @@ namespace MigrationStudio.Ui.Pages
                     Mode = mode
                 }, progress, _startCts.Token).ConfigureAwait(true);
                 _presenter.Attach(client, mode, false);
+                UiTrace.Write("run", "시작 " + client.RunId + " (pid " + client.Pid + ", " + mode + ")");
                 Kit.Toast(_host.Owner, "실행 " + client.RunId + " 시작", "ok");
             }
             catch (OperationCanceledException)
             {
+                UiTrace.Write("run", "시작 취소");
                 _presenter.StartFailed("시작을 취소했습니다.");
             }
             catch (Exception ex)
             {
+                UiTrace.Write("run", "시작 실패: " + ex);
                 _presenter.StartFailed(ex.Message);
             }
         }

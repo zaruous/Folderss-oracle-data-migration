@@ -277,7 +277,7 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
             if (type.IsChar) return type.Base == "NCHAR" || type.Base == "NVARCHAR2" ? OracleDbType.NVarchar2 : OracleDbType.Varchar2;
             if (type.IsNumber) return OracleDbType.Decimal;
             if (type.Base == "DATE") return OracleDbType.Date;
-            if (type.Base == "TIMESTAMP") return type.TimeZone == "TZ" ? OracleDbType.TimeStampTZ : OracleDbType.TimeStamp;
+            if (type.Base == "TIMESTAMP") return type.TimeZone == "TZ" ? OracleDbType.TimeStampTZ : type.TimeZone == "LTZ" ? OracleDbType.TimeStampLTZ : OracleDbType.TimeStamp;
             if (type.Base == "CLOB") return OracleDbType.Clob;
             if (type.Base == "BLOB") return OracleDbType.Blob;
             if (type.Base == "RAW") return OracleDbType.Raw;

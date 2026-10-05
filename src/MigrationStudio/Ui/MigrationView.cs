@@ -202,6 +202,10 @@ namespace MigrationStudio.Ui
                 _window.PreviewKeyDown += OnPreviewKeyDown;
                 _window.Closing += OnWindowClosing;
             }
+
+            // 창을 닫아도 에이전트는 계속 돈다 — 다시 열면 살아 있는 실행에 다시 붙는다(같은 작업이면 바로, 아니면 실행 화면에 안내)
+            EnsureRunPage();
+            _runPage.CheckAliveRuns();
         }
 
         private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -219,6 +223,13 @@ namespace MigrationStudio.Ui
             {
                 DraftAutosave.FlushNow(_state, AppServices.DataDirectory);
                 DraftAutosave.Release(_state);
+            }
+
+            // 창을 닫을 때 에이전트 파이프를 끊어야 에이전트가 다음 접속을 받는다 — 안 끊으면(GC까지 열려 있음) 다시 연 창이
+            // "[Connect] 에이전트 파이프 연결 시간 초과"로 붙지 못한다. 에이전트 자체는 계속 돈다(창과 무관).
+            if (_runPresenter != null)
+            {
+                _runPresenter.Detach();
             }
         }
 
@@ -291,11 +302,16 @@ namespace MigrationStudio.Ui
             }
         }
 
-        private static bool IsDialogOpen()
+        /// <summary>
+        /// 플러그인 창 위에 모달 대화상자가 떠 있으면 단축키를 먹지 않는다. Folderss 안에서는 플러그인 창 자체가
+        /// 본체 창을 Owner로 갖는 소유 창이므로, "Owner가 있는 활성 창"만으로 판단하면 플러그인 창을 대화상자로 오인해
+        /// F5·F6·Ctrl+숫자가 모두 죽는다 — 우리 창(_window)은 제외한다.
+        /// </summary>
+        private bool IsDialogOpen()
         {
             foreach (Window w in Application.Current.Windows)
             {
-                if (w.IsActive && w != Application.Current.MainWindow && w.Owner != null)
+                if (w.IsActive && w != _window && w != Application.Current.MainWindow && w.Owner != null)
                 {
                     return true;
                 }
@@ -362,6 +378,12 @@ namespace MigrationStudio.Ui
             _statusBar.Refresh();
         }
 
+        /// <summary>DevHost 검수용 — 단계 막대의 ▽(작업 정의·매핑 템플릿)를 펼친 상태로.</summary>
+        public void OpenRailExtra()
+        {
+            _rail.OpenExtra();
+        }
+
         public void PrepareForDevHostShot(int step, string openUi, bool fakeOracle)
         {
             if (fakeOracle)
@@ -372,6 +394,12 @@ namespace MigrationStudio.Ui
             if (step >= 1 && step <= 5)
             {
                 GoToStep(step - 1);
+            }
+
+            if (string.Equals(openUi, "rail-extra", StringComparison.OrdinalIgnoreCase))
+            {
+                // 그림 캡처는 바로 찍히므로 지연 실행이 아니라 여기서 펼친다
+                _rail.OpenExtra();
             }
 
             if (string.Equals(openUi, "columns-sql", StringComparison.OrdinalIgnoreCase))
@@ -487,6 +515,7 @@ namespace MigrationStudio.Ui
                     if (_connectionPage == null)
                     {
                         _connectionPage = new ConnectionPage(_state, _connections, tab => OpenSettings(tab));
+                        WireFooterNav(_connectionPage, 0);
                     }
 
                     _pageHost.Content = _connectionPage;
@@ -496,6 +525,7 @@ namespace MigrationStudio.Ui
                     if (_tablesPage == null)
                     {
                         _tablesPage = new TablesPage(this);
+                        WireFooterNav(_tablesPage, 1);
                     }
 
                     _pageHost.Content = _tablesPage;
@@ -505,6 +535,7 @@ namespace MigrationStudio.Ui
                     if (_columnsPage == null)
                     {
                         _columnsPage = new ColumnsPage(this);
+                        WireFooterNav(_columnsPage, 2);
                     }
 
                     _pageHost.Content = _columnsPage;
@@ -514,6 +545,7 @@ namespace MigrationStudio.Ui
                     if (_validationPage == null)
                     {
                         _validationPage = new ValidationPage(this, CreateValidationService, CreatePostValidation);
+                        WireFooterNav(_validationPage, 3);
                     }
 
                     _pageHost.Content = _validationPage;
@@ -849,7 +881,15 @@ namespace MigrationStudio.Ui
             if (_runPage == null)
             {
                 _runPage = new RunPage(this, _runPresenter, CreateRunService);
+                WireFooterNav(_runPage, 4);
             }
+        }
+
+        /// <summary>페이지 바닥의 ‹ 이전 / 다음 › 버튼을 단계 이동에 연결한다(페이지는 셸을 모르므로 여기서 묶는다).</summary>
+        private void WireFooterNav(PageFrame page, int step)
+        {
+            page.PrevClicked += () => GoToStep(step - 1);
+            page.NextClicked += () => GoToStep(step + 1);
         }
 
         private IRunService CreateRunService()

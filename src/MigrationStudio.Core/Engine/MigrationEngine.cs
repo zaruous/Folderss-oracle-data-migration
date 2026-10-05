@@ -54,7 +54,8 @@ namespace MigrationStudio.Core.Engine
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _listener = listener ?? new NullRunListener();
             _clock = clock ?? new SystemRunClock();
-            _recorder = recorder ?? new NullRunRecorder();
+            // 실행 기록(MIG_RUN·MIG_RUN_TASK)은 이관의 부가 정보다 — 기록이 안 된다고 이관을 멈추지 않고, 한 번 경고한 뒤 기록을 끈다
+            _recorder = recorder == null ? (IRunRecorder)new NullRunRecorder() : new BestEffortRecorder(this, recorder);
             foreach (var item in _spec.Plan)
             {
                 _tasks.Add(new TaskState(item));
@@ -837,9 +838,96 @@ namespace MigrationStudio.Core.Engine
             return text;
         }
 
+        /// <summary>
+        /// 실행 기록기 감싸개: 대상에 MIG_RUN을 못 쓰면(권한·테이블 없음·일시 장애) WARN 한 줄 남기고 이후 기록을 건너뛴다.
+        /// 기록기 예외가 이관 자체를 실패시키던 것(시험 어댑터·로컬 체크포인트 모드)을 막는다.
+        /// </summary>
+        private sealed class BestEffortRecorder : IRunRecorder
+        {
+            private readonly MigrationEngine _engine;
+            private readonly IRunRecorder _inner;
+            private volatile bool _disabled;
+
+            internal BestEffortRecorder(MigrationEngine engine, IRunRecorder inner)
+            {
+                _engine = engine;
+                _inner = inner;
+            }
+
+            public Task StartAsync(RunSpec spec, CancellationToken cancellationToken)
+            {
+                return Guard(() => _inner.StartAsync(spec, cancellationToken), cancellationToken);
+            }
+
+            public Task TaskStartedAsync(RunSpec spec, PlanItem item, CancellationToken cancellationToken)
+            {
+                return Guard(() => _inner.TaskStartedAsync(spec, item, cancellationToken), cancellationToken);
+            }
+
+            public Task TaskEndedAsync(RunSpec spec, TaskSnapshot task, CancellationToken cancellationToken)
+            {
+                return Guard(() => _inner.TaskEndedAsync(spec, task, cancellationToken), cancellationToken);
+            }
+
+            public Task EndAsync(RunSpec spec, RunSnapshot snapshot, string message, CancellationToken cancellationToken)
+            {
+                return Guard(() => _inner.EndAsync(spec, snapshot, message, cancellationToken), cancellationToken);
+            }
+
+            private async Task Guard(Func<Task> call, CancellationToken cancellationToken)
+            {
+                if (_disabled)
+                {
+                    return;
+                }
+
+                try
+                {
+                    await call().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _disabled = true;
+                    _engine.Log("WARN", "실행 기록(MIG_RUN)을 쓰지 못해 이번 실행은 기록 없이 계속합니다: " + _engine.SafeError(ex));
+                }
+            }
+        }
+
         private string SafeError(Exception ex)
         {
-            return Redact(OracleErrors.Describe(ex));
+            var text = Redact(OracleErrors.Describe(ex));
+            // Oracle 오류는 ORA 코드로 충분하지만, 그 밖의 예외는 "Value cannot be null." 한 줄로는 어디서 났는지 알 수 없다 — 형식과 첫 프레임을 붙인다
+            if (ex != null && !(ex is Oracle.ManagedDataAccess.Client.OracleException) && !(ex is OperationCanceledException))
+            {
+                var inner = ex;
+                while (inner.InnerException != null && !(inner is Oracle.ManagedDataAccess.Client.OracleException))
+                {
+                    inner = inner.InnerException;
+                }
+
+                text += " [" + inner.GetType().Name + FirstFrame(inner) + "]";
+            }
+
+            return text;
+        }
+
+        private static string FirstFrame(Exception ex)
+        {
+            try
+            {
+                var trace = new System.Diagnostics.StackTrace(ex, false);
+                var frame = trace.GetFrame(0);
+                var method = frame != null ? frame.GetMethod() : null;
+                return method != null && method.DeclaringType != null ? " @ " + method.DeclaringType.Name + "." + method.Name : "";
+            }
+            catch
+            {
+                return "";
+            }
         }
 
         private async Task<ITargetSession> OpenTargetAsync(CancellationToken cancellationToken)

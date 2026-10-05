@@ -129,6 +129,16 @@ namespace MigrationAgent
                             return 30;
                         }
                     }
+                    else if (_endedSent)
+                    {
+                        // 끝난 뒤: --idle-exit초 안에 결과를 보러 다시 붙는 클라이언트가 없으면 나간다(결과·로그는 runs/·logs/에 남아 있다).
+                        // 예전에는 클라이언트가 떠난 뒤 그냥 잠들어 그동안 아무도 붙을 수 없었다.
+                        var completed = await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(_idleExitSeconds), _hostCts.Token)).ConfigureAwait(false);
+                        if (completed != wait)
+                        {
+                            return ExitCode(_engineState);
+                        }
+                    }
                     else
                     {
                         await wait.ConfigureAwait(false);
@@ -167,19 +177,8 @@ namespace MigrationAgent
                     return ExitCode(_engineState);
                 }
 
-                if (_endedSent)
-                {
-                    // 끝난 뒤에도 클라이언트가 다시 붙어 결과를 볼 수 있게 --idle-exit초 기다린다(shutdown이 오면 바로 끝)
-                    try
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(_idleExitSeconds), _hostCts.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                    }
-
-                    return ExitCode(_engineState);
-                }
+                // 클라이언트가 떠나면(창 닫힘 등) 다음 바퀴에서 새 파이프를 열어 다시 붙을 수 있게 한다.
+                // 실행이 끝난 뒤라면 위에서 --idle-exit초만 기다린다.
             }
 
             return 0;
@@ -291,20 +290,27 @@ namespace MigrationAgent
             ISourceFactory source;
             ITargetFactory target;
             ICheckpointStore store;
+            IRunRecorder recorder;
             if (string.Equals(Environment.GetEnvironmentVariable("MIGRATION_AGENT_TEST_ADAPTER"), "memory", StringComparison.OrdinalIgnoreCase))
             {
                 MemoryTestBootstrap.Create(spec, out source, out target, out store);
+                // 시험 어댑터에는 Oracle이 없다 — 실행 기록(MIG_RUN)도 쓰지 않는다. 전에는 기록기가 빈 접속으로 연결 문자열을 만들다
+                // "Value cannot be null"로 실행 전체가 실패했고, 시험이 끝남만 확인해서 눈에 띄지 않았다.
+                recorder = null;
             }
             else
             {
                 source = new OracleSourceFactory(spec.Source);
                 target = new OracleTargetFactory(spec.Target, spec.ControlPrefix, spec.RunId);
-                store = string.Equals(spec.CheckpointStore, "LOCAL", StringComparison.OrdinalIgnoreCase)
+                var local = string.Equals(spec.CheckpointStore, "LOCAL", StringComparison.OrdinalIgnoreCase);
+                store = local
                     ? new LocalCheckpointStore(Path.Combine(spec.DataDirectory, "checkpoints"))
                     : (ICheckpointStore)new OracleCheckpointStore(spec.Target, spec.ControlPrefix);
+                // 로컬 파일 체크포인트는 대상에 MIG_ 제어 테이블이 없거나 못 만들 때 고르는 것 — 실행 기록(MIG_RUN)도 대상에 쓰지 않는다
+                recorder = local ? null : new OracleRunRecorder(spec.Target, spec.ControlPrefix);
             }
 
-            _engine = new MigrationEngine(spec, source, target, store, listener, new SystemRunClock(), new OracleRunRecorder(spec.Target, spec.ControlPrefix));
+            _engine = new MigrationEngine(spec, source, target, store, listener, new SystemRunClock(), recorder);
             _engineTask = Task.Run(() => _engine.RunAsync(_hostCts.Token));
         }
 
@@ -455,7 +461,9 @@ namespace MigrationAgent
         {
             try
             {
-                if (_record == null)
+                // 끝난 뒤의 정상 종료(End를 보냈고 idle-exit·shutdown으로 나감)는 사고가 아니다 — 실제 Folderss에서 완료된 실행이
+                // 기록에는 "crashed · process-exit"로 남던 원인. 끝나기 전에 프로세스가 사라질 때만 남긴다.
+                if (_record == null || _endedSent)
                 {
                     return;
                 }

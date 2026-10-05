@@ -90,5 +90,8 @@ namespace MigrationStudio.Core.Metadata
         public string Name { get; set; }
         public double FreeGb { get; set; }
         public double? QuotaLeftGb { get; set; }
+
+        /// <summary>데이터 파일 자동 확장으로 더 커질 수 있는 양(GB). DBA_DATA_FILES를 읽지 못하면 null(모름).</summary>
+        public double? AutoExtendGb { get; set; }
     }
 }

@@ -13,17 +13,24 @@ namespace DevHost
     {
         private readonly int _freezeAt;
         private readonly int _delayMs;
+        private readonly bool _passOnly;
 
         /// <param name="freezeAt">0보다 크면 그 개수에서 멈춘다(진행 중 화면 캡처용).</param>
-        public FakeValidationService(int freezeAt, int delayMs)
+        /// <param name="passOnly">ERROR 항목을 빼서 "이관 실행 가능" 상태(실행 화면 링크가 있는 가지)를 보인다 — 실제 Oracle에서만 나던 예외를 잡기 위한 조합.</param>
+        public FakeValidationService(int freezeAt, int delayMs, bool passOnly = false)
         {
             _freezeAt = freezeAt;
             _delayMs = delayMs;
+            _passOnly = passOnly;
         }
 
         public async Task<List<ValidationItem>> RunPreAsync(Action<ValidationItem> onItem, CancellationToken ct)
         {
             var all = Canned();
+            if (_passOnly)
+            {
+                all.RemoveAll(i => i.Level == CheckLevels.Error);
+            }
             var result = new List<ValidationItem>();
             foreach (var item in all)
             {

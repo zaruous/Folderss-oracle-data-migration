@@ -75,7 +75,8 @@ namespace MigrationStudio.Logic
 
             if (session.Status == ConnStatus.Ok && result != null && result.Ok)
             {
-                var ms = result.LatencyMs.HasValue ? result.LatencyMs.Value.ToString(CultureInfo.InvariantCulture) : "0";
+                // 같은 PC의 DB는 1ms 아래로 재서 0이 나온다 — "0 ms"는 안 쟀다는 뜻으로 읽히니 "<1"로
+                var ms = !result.LatencyMs.HasValue ? "?" : result.LatencyMs.Value <= 0 ? "<1" : result.LatencyMs.Value.ToString(CultureInfo.InvariantCulture);
                 return "ok|✓ Connected|" + (result.Version ?? "") + "|" + ms + "|" + FormatTime(result.TestedAt);
             }
 

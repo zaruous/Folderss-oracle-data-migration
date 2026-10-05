@@ -17,8 +17,10 @@ namespace MigrationStudio.Ui
         private readonly TextBlock _jobTitle = new TextBlock();
         private readonly StackPanel _jobFlow = new StackPanel { Orientation = Orientation.Horizontal };
         private readonly Border _headBorder = new Border();
-        private readonly Border _footBorder = new Border();
+        private readonly StackPanel _extraPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed };
+        private readonly Button _extraToggle;
         private bool _collapsed;
+        private bool _extraOpen;
 
         public StepRail(StudioState state, Action<int> onStep)
         {
@@ -35,31 +37,36 @@ namespace MigrationStudio.Ui
             _headBorder.BorderThickness = new Thickness(0, 0, 0, 1);
             _headBorder.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
             var head = new StackPanel();
+            // 머리 줄: "이관 작업" 글자 + 오른쪽 ▽ — 작업 정의·매핑 템플릿 링크는 오른쪽으로 밀지 않고 ▽를 눌렀을 때만 아래에 펼친다
+            var capRow = new Grid();
+            capRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            capRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var cap = Theme.Secondary("이관 작업");
             cap.FontSize = 11;
-            head.Children.Add(cap);
+            cap.VerticalAlignment = VerticalAlignment.Center;
+            capRow.Children.Add(cap);
+            _extraToggle = Kit.IconButton(Icons.ChevronDown, "작업 정의 · 매핑 템플릿 펼치기");
+            _extraToggle.Width = 22;
+            _extraToggle.Height = 22;
+            _extraToggle.FontSize = 11;
+            _extraToggle.Click += (s, e) => SetExtraOpen(!_extraOpen);
+            Grid.SetColumn(_extraToggle, 1);
+            capRow.Children.Add(_extraToggle);
+            head.Children.Add(capRow);
             _jobTitle.FontWeight = FontWeights.SemiBold;
             _jobTitle.FontSize = 13.5;
             _jobTitle.TextTrimming = TextTrimming.CharacterEllipsis;
             head.Children.Add(_jobTitle);
             _jobFlow.Margin = new Thickness(0, 4, 0, 0);
             head.Children.Add(_jobFlow);
+            head.Children.Add(_extraPanel);
             _headBorder.Child = head;
             DockPanel.SetDock(_headBorder, Dock.Top);
             root.Children.Add(_headBorder);
 
             _stepsPanel.Margin = new Thickness(10, 8, 10, 8);
             root.Children.Add(_stepsPanel);
-
-            _footBorder.Padding = new Thickness(12, 10, 12, 12);
-            _footBorder.BorderThickness = new Thickness(0, 1, 0, 0);
-            _footBorder.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
-            var foot = new StackPanel();
-            foot.Children.Add(LinkRow(Icons.Page, "작업 정의", () => { }));
-            foot.Children.Add(LinkRow(Icons.ExportFile, "매핑 템플릿", null, false));
-            _footBorder.Child = foot;
-            DockPanel.SetDock(_footBorder, Dock.Bottom);
-            root.Children.Add(_footBorder);
+            RebuildFoot();
 
             Child = root;
             Loaded += OnLoaded;
@@ -119,12 +126,28 @@ namespace MigrationStudio.Ui
             RebuildFoot();
         }
 
+        /// <summary>▽로 펼치는 보조 링크(작업 정의 · 매핑 템플릿 내보내기).</summary>
         private void RebuildFoot()
         {
-            var foot = new StackPanel();
-            foot.Children.Add(LinkRow(Icons.Page, "작업 정의", _jobDefinitionAction, _jobDefinitionAction != null));
-            foot.Children.Add(LinkRow(Icons.ExportFile, "매핑 템플릿", _templateExportAction, _templateExportAction != null));
-            _footBorder.Child = foot;
+            _extraPanel.Children.Clear();
+            _extraPanel.Children.Add(LinkRow(Icons.Page, "작업 정의", _jobDefinitionAction, _jobDefinitionAction != null));
+            _extraPanel.Children.Add(LinkRow(Icons.ExportFile, "매핑 템플릿 내보내기", _templateExportAction, _templateExportAction != null));
+        }
+
+        private void SetExtraOpen(bool open)
+        {
+            _extraOpen = open;
+            _extraPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            _extraToggle.Content = open ? Icons.ChevronUp : Icons.ChevronDown;
+            var tip = open ? "작업 정의 · 매핑 템플릿 접기" : "작업 정의 · 매핑 템플릿 펼치기";
+            _extraToggle.ToolTip = tip;
+            Kit.NameForAutomation(_extraToggle, tip);
+        }
+
+        /// <summary>DevHost 검수용 — 펼친 상태로 그린다.</summary>
+        public void OpenExtra()
+        {
+            SetExtraOpen(true);
         }
 
         private void ApplyCollapse(bool collapse)
@@ -138,7 +161,6 @@ namespace MigrationStudio.Ui
             Width = collapse ? 52 : 208;
             MinWidth = collapse ? 52 : 208;
             _headBorder.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
-            _footBorder.Visibility = collapse ? Visibility.Collapsed : Visibility.Visible;
             RebuildSteps();
         }
 

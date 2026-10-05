@@ -187,23 +187,37 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
         {
             if (_reader.IsDBNull(ordinal)) return DBNull.Value;
             var name = _reader.GetDataTypeName(ordinal).ToUpperInvariant();
-            if (name == "NUMBER" || name == "FLOAT" || name == "INTEGER") return _reader.GetOracleDecimal(ordinal);
-            if (name == "DATE") return _reader.GetDateTime(ordinal);
-            if (name.StartsWith("TIMESTAMP", StringComparison.Ordinal) && name.IndexOf("TIME ZONE", StringComparison.Ordinal) >= 0) return _reader.GetOracleTimeStampTZ(ordinal);
-            if (name.StartsWith("TIMESTAMP", StringComparison.Ordinal)) return _reader.GetOracleTimeStamp(ordinal).Value;
-            if (name == "CLOB" || name == "NCLOB")
-            {
-                using (var clob = _reader.GetOracleClob(ordinal)) return clob.Value;
-            }
-            if (name == "BLOB")
-            {
-                using (var blob = _reader.GetOracleBlob(ordinal)) return blob.Value;
-            }
-            if (name == "RAW") return (byte[])_reader.GetValue(ordinal);
-            if (name.Contains("CHAR", StringComparison.Ordinal)) return _reader.GetString(ordinal);
-            if (name == "LONG" || name == "XMLTYPE" || name.Contains("OBJECT", StringComparison.Ordinal))
+            if (name == "LONG" || name == "LONG RAW" || name == "XMLTYPE" || name.Contains("OBJECT", StringComparison.Ordinal))
                 throw new UnsupportedColumnTypeException(_reader.GetName(ordinal) + " 열의 " + name + " 형식은 이관 엔진이 지원하지 않습니다.");
-            return _reader.GetValue(ordinal);
+
+            // ODP.NET의 GetDataTypeName은 "TimeStampTZ"처럼 공급자 이름을 돌려주기도 해서 "TIME ZONE" 문자열로는 못 가른다 —
+            // 실제 Oracle(TIMESTAMP(6) WITH TIME ZONE 열)에서 GetOracleTimeStamp로 읽다 "Specified cast is not valid"가 났다.
+            // 공급자 고유 형식(OracleTimeStampTZ 등)으로 가르면 이름 표기와 상관없다.
+            try
+            {
+                var kind = _reader.GetProviderSpecificFieldType(ordinal);
+                if (kind == typeof(OracleDecimal)) return _reader.GetOracleDecimal(ordinal);
+                if (kind == typeof(OracleDate)) return _reader.GetDateTime(ordinal);
+                if (kind == typeof(OracleTimeStampTZ)) return _reader.GetOracleTimeStampTZ(ordinal);
+                if (kind == typeof(OracleTimeStampLTZ)) return _reader.GetOracleTimeStampLTZ(ordinal);
+                if (kind == typeof(OracleTimeStamp)) return _reader.GetOracleTimeStamp(ordinal).Value;
+                if (kind == typeof(OracleClob))
+                {
+                    using (var clob = _reader.GetOracleClob(ordinal)) return clob.Value;
+                }
+                if (kind == typeof(OracleBlob))
+                {
+                    using (var blob = _reader.GetOracleBlob(ordinal)) return blob.Value;
+                }
+                if (kind == typeof(OracleBinary)) return (byte[])_reader.GetValue(ordinal);
+                if (kind == typeof(OracleString)) return _reader.GetString(ordinal);
+                return _reader.GetValue(ordinal);
+            }
+            catch (InvalidCastException ex)
+            {
+                // 어느 열인지 모르면 로그만 보고 고칠 수 없다
+                throw new InvalidOperationException(_reader.GetName(ordinal) + " 열(" + name + ") 값을 읽지 못했습니다: " + ex.Message, ex);
+            }
         }
 
         public void Dispose()

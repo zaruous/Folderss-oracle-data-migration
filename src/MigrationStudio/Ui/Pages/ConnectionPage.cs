@@ -409,7 +409,10 @@ namespace MigrationStudio.Ui.Pages
                 return;
             }
 
-            btn.Content = session.Metadata != null ? "메타데이터 다시 불러오기" : "메타데이터 불러오기";
+            var label = session.Metadata != null ? "메타데이터 다시 불러오기" : "메타데이터 불러오기";
+            btn.Content = label;
+            // 글자를 바꾸면 UI 자동화 이름도 같이 — 아니면 화면 낭독기·자동 검사가 두 버튼을 같은 이름으로 본다
+            Kit.NameForAutomation(btn, label);
         }
 
         private void RefreshSummary(string role, StackPanel host)

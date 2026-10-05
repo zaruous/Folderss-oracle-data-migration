@@ -363,11 +363,8 @@ namespace MigrationStudio.Ui.Pages
                 notice.Margin = new Thickness(0, 0, 0, 10);
                 if (gate.ShowRunLink)
                 {
-                    var linkPanel = new StackPanel { Orientation = Orientation.Horizontal };
+                    // 통과(ERROR 0)일 때만 오는 가지 — 요소를 다른 패널에 먼저 붙였다가 다시 붙이면 WPF가 "이미 다른 요소의 논리 자식"으로 던진다
                     var link = Kit.LinkButton("실행 화면으로 ›", () => _host.GoToStep(4));
-                    linkPanel.Children.Add(link);
-                    var wrap = new StackPanel();
-                    wrap.Children.Add(notice);
                     notice.Margin = new Thickness(0);
                     var host = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
                     host.Children.Add(notice);

@@ -401,6 +401,47 @@ namespace MigrationStudio.Core.Mapping
                 return new CompatResult { Level = CheckLevels.Warn, Message = "날짜 → 문자: TO_CHAR(값, 형식)을 쓰세요(NLS에 따라 달라짐)" };
             }
 
+            // LOB·RAW·LONG — 위의 문자/숫자/날짜 규칙에 걸리지 않은 나머지. 같은 기본 형식끼리는 그대로 들어간다(CLOB → CLOB 등).
+            if (string.Equals(s.Base, t.Base, StringComparison.Ordinal))
+            {
+                return new CompatResult { Level = CheckLevels.Pass, Message = "호환" };
+            }
+
+            if (s.Base == "CLOB" && t.IsChar)
+            {
+                return new CompatResult
+                {
+                    Level = CheckLevels.Warn,
+                    Kind = "truncate",
+                    Message = "CLOB → " + targetType + ": 길이를 넘는 값은 ORA-22835 — DBMS_LOB.SUBSTR(열, n)을 쓰거나 대상을 CLOB으로"
+                };
+            }
+
+            if (s.IsChar && (t.Base == "CLOB" || t.Base == "NCLOB"))
+            {
+                return new CompatResult { Level = CheckLevels.Pass, Message = "문자 → " + t.Base + " 암시 변환" };
+            }
+
+            if ((s.Base == "CLOB" && t.Base == "NCLOB") || (s.Base == "NCLOB" && t.Base == "CLOB"))
+            {
+                return new CompatResult { Level = CheckLevels.Warn, Message = s.Base + " → " + t.Base + ": 문자 집합 변환(표현할 수 없는 글자는 바뀜)" };
+            }
+
+            if (s.Base == "LONG" && t.Base == "CLOB")
+            {
+                return new CompatResult { Level = CheckLevels.Warn, Message = "LONG → CLOB: TO_LOB(열)을 쓰세요" };
+            }
+
+            if (s.Base == "RAW" && t.Base == "BLOB")
+            {
+                return new CompatResult { Level = CheckLevels.Pass, Message = "RAW → BLOB 암시 변환" };
+            }
+
+            if (s.Base == "LONG RAW" && t.Base == "BLOB")
+            {
+                return new CompatResult { Level = CheckLevels.Warn, Message = "LONG RAW → BLOB: TO_LOB(열)을 쓰세요" };
+            }
+
             return new CompatResult
             {
                 Level = CheckLevels.Error,

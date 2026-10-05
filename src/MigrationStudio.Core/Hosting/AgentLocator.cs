@@ -155,13 +155,39 @@ namespace MigrationStudio.Core.Hosting
             }
         }
 
+        /// <summary>
+        /// MigrationAgent.exe는 .NET apphost(네이티브 PE)라 <see cref="AssemblyName.GetAssemblyName(string)"/>이
+        /// "PE image does not have metadata"로 실패한다(실제 Folderss에 설치해 돌릴 때 [Plan] 단계에서 난 오류).
+        /// 버전은 파일 버전 정보(InformationalVersion) → 옆의 관리 어셈블리 MigrationAgent.dll 순으로 읽는다.
+        /// </summary>
         private static string ReadAgentVersion(string exePath)
         {
-            var asm = AssemblyName.GetAssemblyName(exePath);
             var info = ReadInformationalVersion(exePath);
-            var version = !string.IsNullOrEmpty(info) ? info : asm.Version.ToString();
+            var version = !string.IsNullOrEmpty(info) ? info : ReadManagedVersion(Path.ChangeExtension(exePath, ".dll")) ?? "0.0.0";
             var hash = HashFile(exePath).Substring(0, 8);
             return version + "+" + hash;
+        }
+
+        private static string ReadManagedVersion(string dllPath)
+        {
+            try
+            {
+                if (!File.Exists(dllPath))
+                {
+                    return null;
+                }
+
+                var asm = AssemblyName.GetAssemblyName(dllPath);
+                return asm.Version != null ? asm.Version.ToString() : null;
+            }
+            catch (BadImageFormatException)
+            {
+                return null;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
         }
 
         private static string ReadInformationalVersion(string exePath)

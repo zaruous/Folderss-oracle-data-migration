@@ -42,6 +42,7 @@ namespace DevHost
             var scrollTo = 0;
             var realValidation = false;
             var freezeValidation = 0;
+            var validationPass = false;
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -95,6 +96,10 @@ namespace DevHost
                         break;
                     case "--freeze-validation":
                         freezeValidation = int.Parse(args[++i]);
+                        runValidation = true;
+                        break;
+                    case "--validation-pass":
+                        validationPass = true;
                         runValidation = true;
                         break;
                     case "--layout-check":
@@ -161,9 +166,10 @@ namespace DevHost
                 var runState = fakeRun;
                 AppServices.RunServiceFactory = (state, connections) => new FakeRunService(runState);
                 var freeze = freezeValidation;
+                var passOnly = validationPass;
                 if (!realValidation)
                 {
-                    AppServices.ValidationServiceFactory = (state, connections) => new FakeValidationService(freeze, freeze > 0 ? 15 : 0);
+                    AppServices.ValidationServiceFactory = (state, connections) => new FakeValidationService(freeze, freeze > 0 ? 15 : 0, passOnly);
                 }
             }
 
@@ -466,6 +472,9 @@ namespace DevHost
                         break;
                     case "template-export":
                         mv.ExportTemplate();
+                        break;
+                    case "rail-extra":
+                        mv.OpenRailExtra();
                         break;
                 }
             });

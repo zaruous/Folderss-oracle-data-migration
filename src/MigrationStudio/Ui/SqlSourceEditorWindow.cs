@@ -210,11 +210,12 @@ namespace MigrationStudio.Ui
             var columns = new Grid();
             columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(326) });
-            columns.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            columns.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             columns.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var left = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
-            left.Children.Add(BuildEditorCard());
+            // 왼쪽: 편집기(위) ↔ 결과(아래)를 분할선으로 나눈다 — 창 높이를 채우고 비율은 끌어서 조절
+            var left = new SplitPane(_host.State.Ui.SqlSplit, r => _host.State.Ui.SqlSplit = r) { Margin = new Thickness(0, 0, 12, 0) };
+            left.Top = BuildEditorCard();
             var tabs = Kit.Segmented(new[]
             {
                 new Kit.SegmentOption { Value = "check", Label = "검증 결과" },
@@ -222,13 +223,13 @@ namespace MigrationStudio.Ui
                 new Kit.SegmentOption { Value = "alias", Label = "Alias 매핑" },
                 new Kit.SegmentOption { Value = "generated", Label = "생성 SQL" }
             }, _tab, v => { _tab = v; RefreshResult(); });
-            var resultScroll = new ScrollViewer { Content = _resultPanel, MaxHeight = 300, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            var resultScroll = new ScrollViewer { Content = _resultPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             var resultCard = Kit.Card(Icons.Check + "  SQL 결과", tabs, resultScroll, null);
-            resultCard.Margin = new Thickness(0, 10, 0, 0);
-            left.Children.Add(resultCard);
+            left.Bottom = resultCard;
             columns.Children.Add(left);
 
-            var right = _rightPanel;
+            // 오른쪽(설정·바인드)은 내용이 길어지면 혼자 스크롤
+            var right = new ScrollViewer { Content = _rightPanel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             RebuildRightPanel();
             Grid.SetColumn(right, 1);
             columns.Children.Add(right);
@@ -240,8 +241,9 @@ namespace MigrationStudio.Ui
                 Grid.SetRow(right, stacked ? 1 : 0);
                 Grid.SetColumnSpan(right, stacked ? 2 : 1);
                 left.Margin = stacked ? new Thickness(0, 0, 0, 10) : new Thickness(0, 0, 12, 0);
+                right.MaxHeight = stacked ? 260 : double.PositiveInfinity;
             };
-            return new ScrollViewer { Content = columns, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            return columns;
         }
 
         /// <summary>설정·바인드 카드는 고른 매핑에 따라 달라지므로 매핑을 불러올 때마다 다시 만든다.</summary>
@@ -318,7 +320,7 @@ namespace MigrationStudio.Ui
             tools.Children.Add(alias);
 
             // 줄 번호 열과 입력 칸은 같은 줄 높이(17)를 쓰고, 입력 칸이 스크롤하면 줄 번호 열도 같이 스크롤한다
-            _sqlBox.Height = 232;
+            _sqlBox.MinHeight = 120;
             _sqlBox.BorderThickness = new Thickness(0);
             _sqlBox.Padding = new Thickness(6, 4, 6, 4);
             _sqlBox.SetValue(TextBlock.LineHeightProperty, 17.0);
@@ -337,7 +339,7 @@ namespace MigrationStudio.Ui
             var gutter = new Border { BorderThickness = new Thickness(0, 0, 1, 0), Child = _gutterScroll };
             gutter.SetResourceReference(Border.BackgroundProperty, Theme.SurfaceBackground);
             gutter.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
-            var editor = new Grid { Height = 232 };
+            var editor = new Grid();
             editor.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
             editor.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             editor.Children.Add(gutter);
@@ -352,10 +354,13 @@ namespace MigrationStudio.Ui
             DockPanel.SetDock(dialect, Dock.Right);
             status.Children.Add(dialect);
             status.Children.Add(_caret);
-            var body = new StackPanel();
-            body.Children.Add(frame);
-            body.Children.Add(_bannerHost);
+            // 상태 줄·알림은 아래에 붙이고 편집기가 남은 높이를 채운다(분할선으로 높이 조절)
+            var body = new DockPanel { LastChildFill = true };
+            DockPanel.SetDock(status, Dock.Bottom);
             body.Children.Add(status);
+            DockPanel.SetDock(_bannerHost, Dock.Bottom);
+            body.Children.Add(_bannerHost);
+            body.Children.Add(frame);
             return Kit.Card(Icons.Code + "  SQL 원본", tools, body, null);
         }
 

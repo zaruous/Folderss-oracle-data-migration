@@ -38,7 +38,15 @@ namespace MigrationStudio.Services
         public string ValFilter { get; set; } = "all";
         public string RunMode { get; set; } = "EXECUTE";
         public HashSet<string> RunSelected { get; set; }
+
+        /// <summary>실행 화면이 한 번이라도 본 매핑 id — 처음 보는 매핑은 기본으로 고르기 위해(RunLogic.SyncSelection).</summary>
+        public HashSet<string> RunKnown { get; set; }
         public string LogFilter { get; set; } = "all";
+
+        // 분할 패널(SplitPane) 위쪽 비율 — 끌어서 바꾼 값을 화면을 다시 그려도 유지
+        public double RunSplit { get; set; } = 0.55;
+        public double TablesSplit { get; set; } = 0.6;
+        public double SqlSplit { get; set; } = 0.5;
     }
 
     /// <summary>실행 전 검증 한 번의 결과(창마다 하나). JobVersion은 시작 때의 작업 버전.</summary>
@@ -146,7 +154,20 @@ namespace MigrationStudio.Services
 
         public void MarkChanged()
         {
-            JobVersion++;
+            MarkChanged(true);
+        }
+
+        /// <param name="affectsValidation">
+        /// false면 저장은 필요하지만(Dirty) 검증 결과는 그대로 유효한 변경 — 실행이 남기는 체크포인트 갱신 등.
+        /// 이것까지 JobVersion을 올리면 이관을 한 번 돌릴 때마다 "검증 뒤 작업이 바뀜"으로 다시 묻는다.
+        /// </param>
+        public void MarkChanged(bool affectsValidation)
+        {
+            if (affectsValidation)
+            {
+                JobVersion++;
+            }
+
             Dirty = true;
             Raise(ChangeScope.Job);
             DraftAutosave.Schedule(this);

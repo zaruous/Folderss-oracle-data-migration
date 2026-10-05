@@ -370,6 +370,31 @@ namespace MigrationStudio.Tests.Engine
             Assert.Contains("ORDER BY ID", sql, StringComparison.Ordinal);
         }
 
+        /// <summary>실행 기록기(MIG_RUN)가 죽어도 이관은 끝까지 간다 — 에이전트 시험 어댑터·로컬 체크포인트 모드에서 기록기 예외가 실행을 통째로 실패시키던 회귀.</summary>
+        [Fact]
+        public async Task Recorder_failure_is_logged_once_and_does_not_fail_the_run()
+        {
+            var fixture = Fixture(WriteModes.InsertOnly, 25);
+            var recorder = new ThrowingRecorder();
+            var engine = new MigrationEngine(fixture.Spec, fixture.SourceFactory, fixture.TargetFactory, fixture.Store, fixture.Listener,
+                new ManualClock(new DateTime(2026, 10, 5, 13, 0, 0)), recorder);
+            await engine.RunAsync(CancellationToken.None);
+
+            Assert.Equal("done", engine.State);
+            Assert.Equal(25, fixture.Target.Rows.Count);
+            Assert.Equal(1, recorder.Calls); // 첫 실패 뒤에는 더 부르지 않는다
+            Assert.Contains(fixture.Listener.Logs, l => l.Tag == "WARN" && l.Text.Contains("MIG_RUN"));
+        }
+
+        private sealed class ThrowingRecorder : IRunRecorder
+        {
+            internal int Calls;
+            public Task StartAsync(RunSpec spec, CancellationToken cancellationToken) { Calls++; throw new InvalidOperationException("ORA-00942: 테이블 또는 뷰가 존재하지 않습니다"); }
+            public Task TaskStartedAsync(RunSpec spec, PlanItem item, CancellationToken cancellationToken) { Calls++; throw new InvalidOperationException("no"); }
+            public Task TaskEndedAsync(RunSpec spec, TaskSnapshot task, CancellationToken cancellationToken) { Calls++; throw new InvalidOperationException("no"); }
+            public Task EndAsync(RunSpec spec, RunSnapshot snapshot, string message, CancellationToken cancellationToken) { Calls++; throw new InvalidOperationException("no"); }
+        }
+
         private static FixtureData Fixture(string mode, int count, MemoryTable target = null, int nameLength = 20,
             string errorPolicy = ErrorPolicies.Continue, string runMode = "EXECUTE", int workers = 1, MemoryCheckpointStore store = null)
         {

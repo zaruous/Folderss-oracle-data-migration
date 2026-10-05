@@ -12,12 +12,16 @@ namespace MigrationStudio.Ui
         private readonly TextBlock _title = new TextBlock();
         private readonly TextBlock _description = new TextBlock();
         private readonly StackPanel _bodyHost = new StackPanel();
+        private readonly Grid _fillHost = new Grid();
+        private ScrollViewer _scroll;
         private readonly Button _prevBtn;
         private readonly Button _nextBtn;
         private readonly TextBlock _footerHint = new TextBlock();
 
         public PageFrame()
         {
+            // 행: 머리(제목·설명·동작) · 본문(스크롤 또는 창을 채우는 분할 패널) · 바닥(이전/다음)
+            RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             SetResourceReference(BackgroundProperty, Theme.WindowBackground);
@@ -27,8 +31,8 @@ namespace MigrationStudio.Ui
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             };
-            var inner = new StackPanel { Margin = new Thickness(20, 16, 20, 0), MaxWidth = 1480 };
-            var headGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            var inner = new StackPanel { Margin = new Thickness(20, 0, 20, 0), MaxWidth = 1480 };
+            var headGrid = new Grid { Margin = new Thickness(20, 16, 20, 14), MaxWidth = 1480 };
             headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             headGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
@@ -64,11 +68,21 @@ namespace MigrationStudio.Ui
             _headerActions.VerticalAlignment = VerticalAlignment.Top;
             Grid.SetColumn(_headerActions, 1);
             headGrid.Children.Add(_headerActions);
-            inner.Children.Add(headGrid);
+            Grid.SetRow(headGrid, 0);
+            Children.Add(headGrid);
+
             inner.Children.Add(_bodyHost);
             scroll.Content = inner;
-            Grid.SetRow(scroll, 0);
+            _scroll = scroll;
+            Grid.SetRow(scroll, 1);
             Children.Add(scroll);
+
+            // 창을 채우는 본문(분할 패널) — SetBodyFill을 부르면 스크롤 본문 대신 이것을 쓴다
+            _fillHost.Margin = new Thickness(20, 0, 20, 14);
+            _fillHost.MaxWidth = 1480;
+            _fillHost.Visibility = Visibility.Collapsed;
+            Grid.SetRow(_fillHost, 1);
+            Children.Add(_fillHost);
 
             var footer = new Border
             {
@@ -93,7 +107,7 @@ namespace MigrationStudio.Ui
             _footerHint.Margin = new Thickness(12, 0, 12, 0);
             footRow.Children.Add(_footerHint);
             footer.Child = footRow;
-            Grid.SetRow(footer, 1);
+            Grid.SetRow(footer, 2);
             Children.Add(footer);
         }
 
@@ -111,11 +125,13 @@ namespace MigrationStudio.Ui
             if (stepIndex > 0)
             {
                 _prevBtn.Content = Kit.ButtonContentForGhost("‹ " + Labels.StepTitles[stepIndex - 1], Icons.Back);
+                Kit.NameForAutomation(_prevBtn, "이전: " + Labels.StepTitles[stepIndex - 1]);
             }
 
             if (stepIndex < Labels.StepTitles.Length - 1)
             {
                 _nextBtn.Content = "다음: " + Labels.StepTitles[stepIndex + 1];
+                Kit.NameForAutomation(_nextBtn, "다음: " + Labels.StepTitles[stepIndex + 1]);
             }
         }
 
@@ -139,8 +155,12 @@ namespace MigrationStudio.Ui
             }
         }
 
+        /// <summary>스크롤되는 본문(기본). 내용이 길면 페이지가 세로로 스크롤한다.</summary>
         public void SetBody(UIElement body)
         {
+            _fillHost.Children.Clear();
+            _fillHost.Visibility = Visibility.Collapsed;
+            _scroll.Visibility = Visibility.Visible;
             _bodyHost.Children.Clear();
             if (body != null)
             {
@@ -151,6 +171,20 @@ namespace MigrationStudio.Ui
 
                 _bodyHost.Children.Add(body);
             }
+        }
+
+        /// <summary>창 높이를 채우는 본문 — 분할 패널(<see cref="SplitPane"/>)처럼 위·아래가 남은 높이를 나눠 가져야 할 때.</summary>
+        public void SetBodyFill(UIElement body)
+        {
+            _bodyHost.Children.Clear();
+            _scroll.Visibility = Visibility.Collapsed;
+            _fillHost.Children.Clear();
+            if (body != null)
+            {
+                _fillHost.Children.Add(body);
+            }
+
+            _fillHost.Visibility = Visibility.Visible;
         }
 
         public void SetFooterHint(string hint)

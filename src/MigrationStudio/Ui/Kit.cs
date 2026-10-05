@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
@@ -632,6 +633,7 @@ namespace MigrationStudio.Ui
                 MinHeight = 28,
                 FontSize = 13
             };
+            NameForAutomation(button, text);
             return button;
         }
 
@@ -645,6 +647,7 @@ namespace MigrationStudio.Ui
                 FontSize = 13
             };
             btn.HorizontalAlignment = HorizontalAlignment.Left;
+            NameForAutomation(btn, text);
             return btn;
         }
 
@@ -669,7 +672,19 @@ namespace MigrationStudio.Ui
                 Padding = new Thickness(0)
             };
             btn.Style = ShellIconStyle();
+            NameForAutomation(btn, tooltip);
             return btn;
+        }
+
+        /// <summary>
+        /// 아이콘+글자 패널이나 글리프 하나가 내용인 버튼은 UI 자동화 이름이 비어 화면 낭독기·자동 검사가 못 찾는다 — 글자를 이름으로 준다.
+        /// </summary>
+        public static void NameForAutomation(UIElement element, string name)
+        {
+            if (element != null && !string.IsNullOrEmpty(name))
+            {
+                System.Windows.Automation.AutomationProperties.SetName(element, name);
+            }
         }
 
         private static void EnsureShellIconStyleInApp()
@@ -816,7 +831,8 @@ namespace MigrationStudio.Ui
 
             toast.HorizontalAlignment = HorizontalAlignment.Right;
             toast.VerticalAlignment = VerticalAlignment.Bottom;
-            toast.Margin = new Thickness(0, 0, 16, 16 + ToastStack.Count * 36);
+            // 페이지 바닥 줄(이전/다음 버튼, 약 56px) 위에 뜨게 — 바닥에 붙이면 "다음" 버튼을 가린다
+            toast.Margin = new Thickness(0, 0, 16, 64 + ToastStack.Count * 36);
             Panel.SetZIndex(toast, 1000);
             var hostGrid = layer as Grid;
             if (hostGrid != null)

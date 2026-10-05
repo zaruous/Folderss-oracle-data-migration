@@ -67,7 +67,9 @@ namespace MigrationStudio.Tests.Hosting
                 var ended = new TaskCompletionSource<string>();
                 client.Ended += (_, reason) => ended.TrySetResult(reason);
                 await client.StartAsync(spec, CancellationToken.None);
-                await ended.Task.WaitAsync(TimeSpan.FromSeconds(60));
+                var reason = await ended.Task.WaitAsync(TimeSpan.FromSeconds(60));
+                // "끝났다"만 보면 실패한 실행도 통과한다 — 실제로 done으로 끝났는지 본다
+                Assert.Equal("done", reason);
                 // 설계(07 지시서 3.2-6): 에이전트는 끝난 뒤 클라이언트가 shutdown을 보내면 즉시 끝난다(안 보내면 --idle-exit 동안 기다림)
                 await client.ShutdownAsync();
                 process.WaitForExit(30000);

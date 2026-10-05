@@ -863,12 +863,16 @@ namespace MigrationStudio.Core.Validation
                 bytes += ((s != null && s.Rows != null) ? s.Rows.Value : 0) * ((t != null && t.AvgRowLength > 0) ? t.AvgRowLength : 100) * 1.35;
             }
 
-            var ts = tgtMeta.Tablespace;
-            TablespaceInfo loaded = null;
-            if (ts == null && ctx.Target != null)
+            // 여유 공간은 시시각각 바뀌고 메타데이터는 캐시에서 올 수 있다 — 접속이 있으면 지금 값을 다시 읽고, 못 읽으면 메타데이터의 것을 쓴다
+            TablespaceInfo ts = null;
+            if (ctx.Target != null)
             {
-                loaded = await TryLoadTablespaceAsync(ctx, ct).ConfigureAwait(false);
-                ts = loaded;
+                ts = await TryLoadTablespaceAsync(ctx, ct).ConfigureAwait(false);
+            }
+
+            if (ts == null)
+            {
+                ts = tgtMeta.Tablespace;
             }
 
             var needGb = bytes / 1024d / 1024d / 1024d;
@@ -881,17 +885,7 @@ namespace MigrationStudio.Core.Validation
             }
             else
             {
-                var freeGb = ts.FreeGb;
-                if (ts.QuotaLeftGb != null && ts.QuotaLeftGb.Value < freeGb)
-                {
-                    freeGb = ts.QuotaLeftGb.Value;
-                }
-
-                var tsLevel = needGb > freeGb ? CheckLevels.Error : needGb > freeGb * 0.7 ? CheckLevels.Warn : CheckLevels.Pass;
-                Emit(items, onItem, Item("공간·실행", "대상 테이블스페이스", ts.Name, tsLevel,
-                    "필요 약 " + needGb.ToString("0.00", CultureInfo.InvariantCulture)
-                    + " GB(행 × 평균 행 길이 × 1.35, 인덱스 포함) / 여유 " + freeGb.ToString(CultureInfo.InvariantCulture) + " GB",
-                    null));
+                Emit(items, onItem, TablespaceItem(ts, needGb));
             }
 
             var byTarget = new Dictionary<string, List<string>>(StringComparer.Ordinal);
@@ -976,6 +970,67 @@ namespace MigrationStudio.Core.Validation
                 && string.Equals(ctx.Job.Strategy.ErrorPolicy, ErrorPolicies.Continue, StringComparison.Ordinal);
         }
 
+        /// <summary>
+        /// 테이블스페이스 판정. 현재 여유(USER_FREE_SPACE)는 데이터 파일이 자동 확장되면 늘어나므로, 자동 확장 여유를 모르는 채
+        /// "여유보다 크다"만으로 ERROR를 내면 작은 DB(XE 등)에서 멀쩡한 이관을 막는다 — 할당량 부족이나 자동 확장까지 합쳐도 모자랄 때만 ERROR,
+        /// 자동 확장을 모르면 WARN.
+        /// </summary>
+        public static ValidationItem TablespaceItem(TablespaceInfo ts, double needGb)
+        {
+            var capacity = ts.FreeGb + (ts.AutoExtendGb ?? 0);
+            if (ts.QuotaLeftGb != null && ts.QuotaLeftGb.Value < capacity)
+            {
+                capacity = ts.QuotaLeftGb.Value;
+            }
+
+            string level;
+            var note = "";
+            if (ts.QuotaLeftGb != null && needGb > ts.QuotaLeftGb.Value)
+            {
+                level = CheckLevels.Error;
+                note = " — 계정 할당량(QUOTA) 부족(ORA-01536)";
+            }
+            else if (needGb > capacity)
+            {
+                if (ts.AutoExtendGb != null)
+                {
+                    level = CheckLevels.Error;
+                    note = " — 자동 확장을 합쳐도 모자람(ORA-01653)";
+                }
+                else
+                {
+                    level = CheckLevels.Warn;
+                    note = " — 자동 확장 여유는 확인 못 함(DBA_DATA_FILES 권한). 모자라면 ORA-01653";
+                }
+            }
+            else if (needGb > capacity * 0.7)
+            {
+                level = CheckLevels.Warn;
+            }
+            else
+            {
+                level = CheckLevels.Pass;
+            }
+
+            var detail = "필요 약 " + Gb(needGb) + "(행 × 평균 행 길이 × 1.35, 인덱스 포함) / 여유 " + Gb(ts.FreeGb);
+            if (ts.AutoExtendGb != null)
+            {
+                detail += " + 자동 확장 " + Gb(ts.AutoExtendGb.Value);
+            }
+
+            if (ts.QuotaLeftGb != null)
+            {
+                detail += " · 할당량 남음 " + Gb(ts.QuotaLeftGb.Value);
+            }
+
+            return Item("공간·실행", "대상 테이블스페이스", ts.Name, level, detail + note, null);
+        }
+
+        private static string Gb(double gb)
+        {
+            return gb.ToString("0.00", CultureInfo.InvariantCulture) + " GB";
+        }
+
         private async Task<TablespaceInfo> TryLoadTablespaceAsync(ValidationContext ctx, CancellationToken ct)
         {
             try
@@ -994,12 +1049,21 @@ namespace MigrationStudio.Core.Validation
                     return null;
                 }
 
-                return new TablespaceInfo
+                var info = new TablespaceInfo
                 {
                     Name = Cell(qr, row, 0),
                     FreeGb = free.Value,
                     QuotaLeftGb = ParseDouble(Cell(qr, row, 2))
                 };
+
+                // 자동 확장 여유는 DBA_DATA_FILES 권한이 있을 때만 — 없으면(ORA-00942) SafeQueryAsync가 null을 주고 "모름"으로 남긴다
+                var auto = await SafeQueryAsync(ctx.Target, ctx.TargetMeta.Schema, ValidationSql.TablespaceAutoExtend(), ct).ConfigureAwait(false);
+                if (auto != null && auto.Rows != null && auto.Rows.Count > 0)
+                {
+                    info.AutoExtendGb = ParseDouble(Cell(auto, auto.Rows[0], 0));
+                }
+
+                return info;
             }
             catch (OperationCanceledException)
             {
@@ -1050,14 +1114,31 @@ namespace MigrationStudio.Core.Validation
             }
         }
 
+        /// <summary>
+        /// <see cref="ValidationSql"/>의 셈 SQL(TargetRowCount·OrphanRows)은 이미 <c>SELECT COUNT(*)</c>다. 어댑터의 CountAsync는 주어진
+        /// SQL을 <c>SELECT COUNT(*) FROM (…)</c>로 한 번 더 감싸므로 "결과 행 수"(항상 1)가 나온다 — 첫 행 첫 셀을 직접 읽는다.
+        /// 실제 Oracle에서 빈 대상 테이블이 "이미 1행 있음"으로 나오던 원인.
+        /// </summary>
         private async Task<long?> SafeCountAsync(ConnectionTarget target, string schema, string sql, CancellationToken ct)
         {
             try
             {
                 OracleSelectGuard.EnsureSelectOnly(sql);
-                return await WithQueryTimeout(
-                    token => _adapter.CountAsync(target, schema, sql, null, token),
-                    ct).ConfigureAwait(false);
+                var qr = await SafeQueryAsync(target, schema, sql, ct).ConfigureAwait(false);
+                if (qr == null || qr.Rows == null || qr.Rows.Count == 0)
+                {
+                    return null;
+                }
+
+                var cell = Cell(qr, qr.Rows[0], 0);
+                long value;
+                if (long.TryParse(cell, NumberStyles.Any, CultureInfo.InvariantCulture, out value))
+                {
+                    return value;
+                }
+
+                var dec = ParseDouble(cell);
+                return dec.HasValue ? (long?)(long)dec.Value : null;
             }
             catch (OperationCanceledException)
             {

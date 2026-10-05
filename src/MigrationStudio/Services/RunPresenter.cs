@@ -193,6 +193,13 @@ namespace MigrationStudio.Services
                 }
 
                 view.Snapshot = snap;
+                // 다시 붙은 실행은 모드를 모르고 시작한다 — 에이전트 스냅숏이 말해 주는 모드(DRY/EXECUTE/RESUME)를 따른다
+                if (!string.IsNullOrEmpty(snap.Mode) && !string.Equals(view.Mode, snap.Mode, StringComparison.Ordinal))
+                {
+                    view.Mode = snap.Mode;
+                    StateChanged?.Invoke();
+                }
+
                 var next = Map(snap.State);
                 if (next != null && next != view.State && RunLogic.IsActive(view.State) || next != null && view.State == RunStates.Starting)
                 {
@@ -265,6 +272,14 @@ namespace MigrationStudio.Services
                 _dirty = true;
                 StateChanged?.Invoke();
                 Flush();
+
+                // 최종 결과를 받았으니 에이전트는 더 기다릴 필요 없다(결과·로그는 runs/·logs/에 남는다).
+                // 안 보내면 --idle-exit(기본 10분)까지 살아 있어 다음 실행이 "동시 실행 한도"에 걸릴 수 있다.
+                var client = view.Client;
+                if (client != null)
+                {
+                    client.ShutdownAsync().ContinueWith(t => { var ignored = t.Exception; }, System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
+                }
             }));
         }
 
@@ -342,7 +357,8 @@ namespace MigrationStudio.Services
             }
 
             _pendingCheckpoints.Clear();
-            _state.MarkChanged();
+            // 체크포인트는 매핑·전략을 바꾸는 게 아니다 — 검증을 무효로 만들지 않는다
+            _state.MarkChanged(false);
         }
     }
 }

@@ -21,6 +21,8 @@ namespace MigrationStudio.Ui
         public const string Arrow = "\uE72A";
         public const string Back = "\uE72B";
         public const string ArrowDown = "\uE74B";
+        public const string ChevronDown = "\uE70D";
+        public const string ChevronUp = "\uE70E";
         public const string Info = "\uE946";
         public const string Warn = "\uE7BA";
         public const string Error = "\uE783";

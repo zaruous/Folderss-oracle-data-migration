@@ -331,6 +331,70 @@ namespace MigrationStudio.OracleIT
             Execute(OracleFixture.SrcUser, OracleFixture.SrcPassword, "COMMIT");
         }
 
+        /// <summary>
+        /// 실제 Folderss에서 Dry Run이 SRC_CUSTOMER(TIMESTAMP WITH TIME ZONE 열)에서 "Specified cast is not valid"로 죽던 회귀 —
+        /// 엔진이 지원한다고 말하는 모든 열 형식을 한 테이블에 모아 원본→대상으로 옮기고 값이 같은지 본다.
+        /// </summary>
+        [OracleFact]
+        public async Task Engine_copies_every_supported_column_type()
+        {
+            const string ddl = "(ID NUMBER(10) PRIMARY KEY, C3 CHAR(3), NC NCHAR(2), NV NVARCHAR2(10), V VARCHAR2(20 CHAR), AMT NUMBER(12,2),"
+                + " D DATE, TS TIMESTAMP(6), TZ TIMESTAMP(6) WITH TIME ZONE, LTZ TIMESTAMP(6) WITH LOCAL TIME ZONE, R RAW(16), CL CLOB, BL BLOB)";
+            Execute(OracleFixture.SrcUser, OracleFixture.SrcPassword, "BEGIN EXECUTE IMMEDIATE 'DROP TABLE TYPES_SRC PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;");
+            Execute(OracleFixture.TgtUser, OracleFixture.TgtPassword, "BEGIN EXECUTE IMMEDIATE 'DROP TABLE TYPES_TGT PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;");
+            Execute(OracleFixture.SrcUser, OracleFixture.SrcPassword, "CREATE TABLE TYPES_SRC " + ddl);
+            Execute(OracleFixture.TgtUser, OracleFixture.TgtPassword, "CREATE TABLE TYPES_TGT " + ddl);
+            Execute(OracleFixture.SrcUser, OracleFixture.SrcPassword,
+                "INSERT INTO TYPES_SRC SELECT LEVEL, 'A'||LEVEL, N'가', N'나다'||LEVEL, '한글'||LEVEL, LEVEL/7, DATE '2021-03-04'+LEVEL,"
+                + " TIMESTAMP '2021-03-04 05:06:07.123456'+NUMTODSINTERVAL(LEVEL,'SECOND'),"
+                + " TO_TIMESTAMP_TZ('2021-03-04 05:06:07.654321 +09:00','YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')+NUMTODSINTERVAL(LEVEL,'MINUTE'),"
+                + " TO_TIMESTAMP_TZ('2021-03-04 05:06:07.000001 +00:00','YYYY-MM-DD HH24:MI:SS.FF6 TZH:TZM')+NUMTODSINTERVAL(LEVEL,'HOUR'),"
+                + " HEXTORAW('DEADBEEF0'||LEVEL), TO_CLOB('clob-'||LEVEL), TO_BLOB(HEXTORAW('CAFEBABE0'||LEVEL)) FROM DUAL CONNECT BY LEVEL<=3");
+            Execute(OracleFixture.SrcUser, OracleFixture.SrcPassword, "COMMIT");
+
+            var names = new[] { "ID", "C3", "NC", "NV", "V", "AMT", "D", "TS", "TZ", "LTZ", "R", "CL", "BL" };
+            var types = new[] { "NUMBER(10)", "CHAR(3)", "NCHAR(2)", "NVARCHAR2(10)", "VARCHAR2(20 CHAR)", "NUMBER(12,2)", "DATE", "TIMESTAMP(6)",
+                "TIMESTAMP(6) WITH TIME ZONE", "TIMESTAMP(6) WITH LOCAL TIME ZONE", "RAW(16)", "CLOB", "BLOB" };
+            var columns = new List<ColumnMetadata>();
+            for (var i = 0; i < names.Length; i++)
+            {
+                columns.Add(new ColumnMetadata { Name = names[i], Type = types[i], Nullable = i > 0, PrimaryKey = i == 0 });
+            }
+
+            var mapping = new Mapping { Id = "TYPES", Source = "TYPES_SRC", Target = "TYPES_TGT", Mode = WriteModes.InsertOnly, CheckpointColumn = "ID", MergeKey = new List<string> { "ID" } };
+            foreach (var column in columns) mapping.Columns.Add(new ColumnMapping { Source = column.Name, Target = column.Name });
+            var plan = new PlanItem
+            {
+                Key = "TYPES", Mapping = mapping, Label = mapping.Label, ScopeTotal = 3,
+                SourceMetadata = new TableMetadata { Name = "TYPES_SRC", Rows = 3, Columns = columns },
+                TargetMetadata = new TableMetadata { Name = "TYPES_TGT", Columns = columns },
+                // 오류 테이블까지: LOB 열이 있는 테이블에 DBMS_ERRLOG.CREATE_ERROR_LOG가 ORA-20069로 실패하던 회귀(skip_unsupported)
+                ErrorTable = "ERR$_TYPES_TGT",
+                Ranges = new List<KeyRange> { new KeyRange { Rows = 3 } }
+            };
+            plan.WriteColumns = SqlGenerator.WriteColumns(mapping, plan.TargetMetadata);
+            Execute(OracleFixture.TgtUser, OracleFixture.TgtPassword, "BEGIN EXECUTE IMMEDIATE 'DROP TABLE ERR$_TYPES_TGT PURGE'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -942 THEN RAISE; END IF; END;");
+
+            var source = Endpoint(OracleFixture.SrcUser, OracleFixture.SrcPassword);
+            var target = Endpoint(OracleFixture.TgtUser, OracleFixture.TgtPassword);
+            await new OracleControlStore(target, "MIG_").EnsureControlTablesAsync(CancellationToken.None);
+            var spec = Spec(source, target, plan, "ORACLE_TYPES", "EXECUTE", "TARGET", ErrorPolicies.Continue);
+            var listener = new Listener();
+            var engine = new MigrationEngine(spec, new OracleSourceFactory(source), new OracleTargetFactory(target, "MIG_", spec.RunId),
+                new OracleCheckpointStore(target, "MIG_"), listener, new SystemRunClock());
+            await engine.RunAsync(CancellationToken.None);
+            Log("TYPES state=" + engine.State + " · " + string.Join(" | ", listener.Logs.Select(l => "[" + l.Tag + "] " + l.Text)));
+            Assert.Equal("done", engine.State);
+            Assert.Equal(3, Scalar(OracleFixture.TgtUser, OracleFixture.TgtPassword, "SELECT COUNT(*) FROM TYPES_TGT"));
+
+            const string hash = "SELECT SUM(ORA_HASH(TO_CHAR(ID)||'|'||C3||'|'||NC||'|'||NV||'|'||V||'|'||TO_CHAR(AMT)||'|'||TO_CHAR(D,'YYYYMMDDHH24MISS')"
+                + "||'|'||TO_CHAR(TS,'YYYYMMDDHH24MISSFF6')||'|'||TO_CHAR(TZ,'YYYYMMDDHH24MISSFF6TZHTZM')||'|'||TO_CHAR(SYS_EXTRACT_UTC(LTZ),'YYYYMMDDHH24MISSFF6')"
+                + "||'|'||RAWTOHEX(R)||'|'||DBMS_LOB.SUBSTR(CL,100,1)||'|'||RAWTOHEX(DBMS_LOB.SUBSTR(BL,100,1)))) FROM ";
+            Assert.Equal(
+                Scalar(OracleFixture.SrcUser, OracleFixture.SrcPassword, hash + "TYPES_SRC"),
+                Scalar(OracleFixture.TgtUser, OracleFixture.TgtPassword, hash + "TYPES_TGT"));
+        }
+
         private PlanItem Plan(string mode, int workers = 4)
         {
             var columns = new List<ColumnMetadata>

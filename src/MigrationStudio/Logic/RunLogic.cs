@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using MigrationStudio.Core.Engine;
+using MigrationStudio.Core.Hosting;
 using MigrationStudio.Core.Model;
 using MigrationStudio.Core.Validation;
 
@@ -101,6 +102,63 @@ namespace MigrationStudio.Logic
     /// <summary>실행 화면의 순수 논리(WPF 없음, 시험 대상).</summary>
     public static class RunLogic
     {
+        // ---------- 실행할 작업 선택 ----------
+
+        /// <summary>
+        /// 실행 화면의 선택 집합을 지금 매핑 목록에 맞춘다. 처음 보는 매핑(사용 중)은 기본으로 고르고, 사라진 매핑은 뺀다 —
+        /// 선택을 "한 번 초기화하고 끝"으로 두면 매핑이 없을 때 실행 화면이 먼저 만들어진 뒤 추가한 매핑이 영영 안 골라진다
+        /// (실제 Folderss에서 "실행할 작업을 고르세요"만 나오고 시작이 안 되던 원인).
+        /// </summary>
+        public static void SyncSelection(ISet<string> selected, ISet<string> known, IEnumerable<Mapping> mappings)
+        {
+            if (selected == null || known == null)
+            {
+                return;
+            }
+
+            var all = (mappings ?? Enumerable.Empty<Mapping>()).Where(m => m != null && !string.IsNullOrEmpty(m.Id)).ToList();
+            foreach (var m in all)
+            {
+                if (known.Add(m.Id) && m.Use)
+                {
+                    selected.Add(m.Id);
+                }
+            }
+
+            selected.IntersectWith(all.Select(m => m.Id));
+        }
+
+        // ---------- 다시 붙기(창을 닫았다 다시 열 때) ----------
+
+        /// <summary>살아 있는 에이전트 중 아직 끝나지 않은 것만 — 끝난 실행은 결과 재접속용으로 잠깐 더 살아 있을 뿐이다.</summary>
+        public static List<AgentRunInfo> AliveForReattach(IEnumerable<AgentRunInfo> alive)
+        {
+            return (alive ?? Enumerable.Empty<AgentRunInfo>()).Where(RunGuard.CountsTowardLimit).ToList();
+        }
+
+        /// <summary>지금 열린 작업과 이름이 같은 실행이면 묻지 않고 바로 붙는다. 다른 작업의 실행은 안내만 하고 사용자가 고른다.</summary>
+        public static AgentRunInfo PickReattach(IEnumerable<AgentRunInfo> alive, string jobName)
+        {
+            if (string.IsNullOrEmpty(jobName))
+            {
+                return null;
+            }
+
+            return AliveForReattach(alive).FirstOrDefault(r => string.Equals(r.JobName, jobName, StringComparison.Ordinal));
+        }
+
+        public static string ReattachNoticeText(IList<AgentRunInfo> alive)
+        {
+            var list = AliveForReattach(alive);
+            if (list.Count == 0)
+            {
+                return "";
+            }
+
+            var names = string.Join(", ", list.Select(r => (string.IsNullOrEmpty(r.JobName) ? "(이름 없음)" : r.JobName) + " · " + r.RunId));
+            return "진행 중인 실행 " + list.Count + "개가 다른 창에서 시작되어 아직 돌고 있습니다: " + names;
+        }
+
         public static bool IsActive(string state)
         {
             return state == RunStates.Starting || state == RunStates.Running || state == RunStates.Pausing || state == RunStates.Paused;

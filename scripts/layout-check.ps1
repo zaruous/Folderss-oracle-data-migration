@@ -84,11 +84,13 @@ $themes = @('black', 'light')
 $main = @('1100x700', '900x600')
 $scenarios = @(
     @{ Name = 'step1 접속';          Args = @('--step', '1');                                   Sizes = $main },
+    @{ Name = 'step1 ▽ 펼침';        Args = @('--step', '1', '--open', 'rail-extra');           Sizes = $main },
     @{ Name = 'step2 테이블 매핑';   Args = @('--step', '2');                                   Sizes = $main },
     @{ Name = 'step3 컬럼 매핑';     Args = @('--step', '3');                                   Sizes = $main },
     @{ Name = 'step4 검증(전)';      Args = @('--step', '4');                                   Sizes = $main },
     @{ Name = 'step4 검증 결과';     Args = @('--step', '4', '--run-validation');               Sizes = $main },
     @{ Name = 'step4 검증 진행 중';  Args = @('--step', '4', '--freeze-validation', '12');      Sizes = $main },
+    @{ Name = 'step4 검증 통과';     Args = @('--step', '4', '--run-validation', '--validation-pass'); Sizes = $main },
     @{ Name = 'step5 실행(대기)';    Args = @('--step', '5');                                   Sizes = $main },
     @{ Name = 'step5 실행 중';       Args = @('--step', '5', '--fake-run', 'running');          Sizes = $main },
     @{ Name = 'step5 일시정지';      Args = @('--step', '5', '--fake-run', 'paused');           Sizes = $main },
