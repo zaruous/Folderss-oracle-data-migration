@@ -10,6 +10,15 @@ namespace MigrationStudio.Tests
     public sealed class RunLogicTests
     {
         [Fact]
+        public void Mode_description_mentions_watermark_only_for_incremental_strategy()
+        {
+            Assert.Contains("워터마크", RunLogic.ModeDescription("EXECUTE", true));
+            Assert.Contains("워터마크", RunLogic.ModeDescription("DRY", true));
+            Assert.DoesNotContain("워터마크", RunLogic.ModeDescription("EXECUTE", false));
+            Assert.Equal(RunLogic.ModeDescription("RESUME"), RunLogic.ModeDescription("RESUME", true));
+        }
+
+        [Fact]
         public void Controls_follow_state()
         {
             var idle = RunLogic.Controls(RunStates.Idle, true);

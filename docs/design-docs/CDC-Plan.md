@@ -224,10 +224,11 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 
 각 단계는 독립 PR 하나로, 완료 조건은 자동 시험으로 판정한다.
 
-### P8-a 증분 이관을 진짜로 만들기 (선행, 원천 무관)
+### P8-a 증분 이관을 진짜로 만들기 (선행, 원천 무관) — **구현됨 (2026-10-09)**
 - `RunMode = INCREMENTAL`(1회성): 워터마크 이후만 읽고 끝에 워터마크 저장. 지금의 `RESUME`과 다른 점은 "완료된 작업도 다시 돌릴 수 있고, 체크포인트가 `done`이어도 그 값부터 읽는다".
 - `Strategy.Mode`가 엔진에 실제로 반영되게 연결(`RunLauncher`/`RunPlanner`), 모드 `INCREMENTAL`인데 `CheckpointColumn` 없는 매핑은 검증 ERROR.
 - 완료 조건: `MigrationEngineTests`에 "1차 실행 후 원본에 3행 추가·2행 수정 → 증분 실행이 그 5행만 MERGE하고 워터마크가 최댓값으로 바뀐다" (`MemoryFakes` 사용). 기존 테스트 전부 통과.
+- 구현 메모: 새 `RunMode` 값을 만들지 않고 `Strategy.Mode = INCREMENTAL` + 기존 `EXECUTE`/`DRY`로 동작한다(플래너 `RunPlanner.BuildAsync`가 저장소의 마지막 키를 `ResumeFrom`으로, `BaseRows = 0`). 병렬 범위 기록(`id#n`)만 있으면 가장 작은 값을 워터마크로 쓴다(`RunPlanner.Watermark`). 워터마크 이후 행 수는 `ISourceProbe.RangesAsync(item, 1, 워터마크)`로 센다(인터페이스 변경 없음). 로컬 파일 저장소의 첫 배치 MERGE 흡수는 `RESUME`뿐 아니라 `ResumeFrom`이 있는 모든 실행에 적용. 검증은 매핑 그룹 `증분 기준`(체크포인트 열 없음·TRUNCATE+INSERT = ERROR, 숫자·날짜 아닌 열 = WARN, INSERT ONLY = INFO). 시험: `tests/MigrationStudio.Tests/Engine/IncrementalRunTests.cs`, `ValidationEngineTests.RunPre_incremental_*`, `RunLogicTests.Mode_description_*`.
 
 ### P8-b 주기 루프 + 상태 + 에이전트 + 상시 실행 안전장치
 - 3.2·3.4·3.7의 엔진·에이전트 변경. UI는 최소(실행 방식 세그먼트 "CDC (변경동기화)", RunPage 회차·지연·마지막 주기 표시, 종료 조건 입력).

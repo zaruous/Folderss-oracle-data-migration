@@ -76,6 +76,7 @@ namespace MigrationStudio.Core.Validation
             }
 
             await RunSqlMappingsAsync(ctx, items, onItem, sqls, srcMeta, tgtMeta, ct).ConfigureAwait(false);
+            EmitIncrementalChecks(ctx, items, onItem, used, srcMeta);
 
             Dictionary<string, Dictionary<string, ColumnStats>> measured = null;
             if (ctx.Source != null)
@@ -961,6 +962,65 @@ namespace MigrationStudio.Core.Validation
                         + "에서 멈춤 (" + cp.At + ") — 실행 화면의 [체크포인트에서 재개]로 이어서 할 수 있음",
                         Fix("run", tm.Id), tm.Id));
                 }
+            }
+        }
+
+        /// <summary>
+        /// 증분 이관(전략 모드 INCREMENTAL)일 때만 내는 매핑별 검사 "증분 기준". 전체 이관이면 아무것도 내지 않아 기존 결과 모양이 바뀌지 않는다.
+        /// 체크포인트 열이 없으면 워터마크를 만들 수 없고, TRUNCATE + INSERT는 워터마크 이후 행만 남기므로 둘 다 ERROR.
+        /// </summary>
+        private static void EmitIncrementalChecks(
+            ValidationContext ctx,
+            List<ValidationItem> items,
+            Action<ValidationItem> onItem,
+            List<MappingModel> used,
+            SchemaMetadata srcMeta)
+        {
+            if (ctx.Job == null || ctx.Job.Strategy == null
+                || !string.Equals(ctx.Job.Strategy.Mode, ExecutionModes.Incremental, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            foreach (var tm in used)
+            {
+                if (string.IsNullOrEmpty(tm.CheckpointColumn))
+                {
+                    Emit(items, onItem, Item("매핑", "증분 기준", LabelOf(tm), CheckLevels.Error,
+                        "체크포인트 열이 없어 워터마크를 만들 수 없음 — 증가하는 키·수정시각 열을 체크포인트로 고르거나 전체 이관으로 실행",
+                        Fix("columns", tm.Id), tm.Id));
+                    continue;
+                }
+
+                if (string.Equals(tm.Mode, WriteModes.TruncateInsert, StringComparison.Ordinal))
+                {
+                    Emit(items, onItem, Item("매핑", "증분 기준", LabelOf(tm), CheckLevels.Error,
+                        "TRUNCATE + INSERT는 워터마크 이후 행만 남겨 대상의 기존 행이 사라짐 — INSERT+UPDATE로 바꾸거나 전체 이관으로 실행",
+                        Fix("tables", tm.Id), tm.Id));
+                    continue;
+                }
+
+                var source = SourceOf(tm, srcMeta, ctx);
+                var column = source != null ? source.FindColumn(tm.CheckpointColumn) : null;
+                var type = column != null && !string.IsNullOrEmpty(column.Type) ? OracleType.Parse(column.Type) : null;
+                var ordered = type != null && (type.IsNumber || type.IsDate);
+                var level = !ordered ? CheckLevels.Warn
+                    : string.Equals(tm.Mode, WriteModes.InsertOnly, StringComparison.Ordinal) ? CheckLevels.Info
+                    : CheckLevels.Pass;
+                var detail = tm.CheckpointColumn + (column != null ? " (" + column.Type + ")" : "") + " > 워터마크 행만 읽음";
+                if (!ordered)
+                {
+                    detail += column == null
+                        ? " · 원본에서 열을 찾지 못해 형식을 확인 못 함"
+                        : " · 숫자·날짜가 아닌 열은 사전순 비교라 증분 기준으로 어긋날 수 있음";
+                }
+                else if (level == CheckLevels.Info)
+                {
+                    detail += " · INSERT ONLY는 워터마크 이후 행이 모두 새 행일 때만 안전 — 수정된 행도 다시 오면 INSERT+UPDATE";
+                }
+
+                Emit(items, onItem, Item("매핑", "증분 기준", LabelOf(tm), level, detail,
+                    level == CheckLevels.Pass ? null : Fix("columns", tm.Id), tm.Id));
             }
         }
 

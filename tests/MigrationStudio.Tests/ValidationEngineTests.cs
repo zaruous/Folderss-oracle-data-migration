@@ -33,6 +33,27 @@ namespace MigrationStudio.Tests
         }
 
         [Fact]
+        public async Task RunPre_incremental_requires_checkpoint_column_and_blocks_truncate()
+        {
+            var full = SampleContext();
+            var fullItems = await new ValidationEngine(Fake(full)).RunPreAsync(full, null, CancellationToken.None);
+            Assert.DoesNotContain(fullItems, i => i.Check == "증분 기준");
+
+            var ctx = SampleContext();
+            ctx.Job.Strategy.Mode = ExecutionModes.Incremental;
+            var order = ctx.Job.Mappings.First(m => m.Id == "tm-order");
+            order.Mode = WriteModes.TruncateInsert;
+            var items = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+
+            // tm-grade: 체크포인트 열 없음 → ERROR / tm-order: TRUNCATE + INSERT → ERROR / tm-customer: NUMBER 키 + MERGE → PASS
+            Assert.Contains(items, i => i.Check == "증분 기준" && i.MappingId == "tm-grade" && i.Level == CheckLevels.Error && i.Detail.Contains("체크포인트 열이 없어"));
+            Assert.Contains(items, i => i.Check == "증분 기준" && i.MappingId == "tm-order" && i.Level == CheckLevels.Error && i.Detail.Contains("TRUNCATE"));
+            Assert.Contains(items, i => i.Check == "증분 기준" && i.MappingId == "tm-customer" && i.Level == CheckLevels.Pass);
+            var gate = ValidationGate.Evaluate(items, new HashSet<string>(StringComparer.Ordinal) { "tm-grade" });
+            Assert.True(gate.Blocked);
+        }
+
+        [Fact]
         public async Task RunPre_missing_meta_stops_with_error()
         {
             var ctx = SampleContext();

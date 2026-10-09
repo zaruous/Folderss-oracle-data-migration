@@ -84,7 +84,27 @@ namespace MigrationStudio.Core.Engine
                 var workers = Math.Max(1, job.Strategy.Workers);
                 CheckpointRecord checkpoint = null;
                 var records = new List<CheckpointRecord>();
-                if (string.Equals(runMode, "RESUME", StringComparison.Ordinal))
+                var incremental = IsIncremental(job) && !string.Equals(runMode, "RESUME", StringComparison.Ordinal);
+                if (incremental)
+                {
+                    // 증분 이관: 지난 실행이 끝났어도(done) 저장된 마지막 키가 워터마크다. 그 다음 키부터만 읽고,
+                    // 진행 수는 이번 실행에서 새로 읽는 행만 센다(BaseRows = 0). 워터마크가 없으면 첫 적재라 처음부터.
+                    records = await store.ListAsync(job.JobName, cancellationToken).ConfigureAwait(false);
+                    var watermark = Watermark(records, mapping.Id);
+                    if (watermark == null)
+                    {
+                        item.Notes = "워터마크 없음 — 처음부터 읽음(첫 적재)";
+                    }
+                    else
+                    {
+                        item.ResumeFrom = watermark;
+                        var after = await probe.RangesAsync(item, 1, watermark, cancellationToken).ConfigureAwait(false);
+                        item.ScopeTotal = after.Sum(r => r.Rows);
+                    }
+                    // 지난 실행의 작업자 범위는 그때 읽은 구간이라 이번 증분에는 쓰지 않는다.
+                    records = new List<CheckpointRecord>();
+                }
+                else if (string.Equals(runMode, "RESUME", StringComparison.Ordinal))
                 {
                     records = await store.ListAsync(job.JobName, cancellationToken).ConfigureAwait(false);
                     checkpoint = await store.GetAsync(job.JobName, mapping.Id, cancellationToken).ConfigureAwait(false);
@@ -132,6 +152,49 @@ namespace MigrationStudio.Core.Engine
             }
 
             return plans;
+        }
+
+        public static bool IsIncremental(MigrationJob job)
+        {
+            return job != null && job.Strategy != null &&
+                string.Equals(job.Strategy.Mode, ExecutionModes.Incremental, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 매핑의 워터마크: 단일 작업자 기록이 있으면 그 값, 병렬 범위(id#n)만 있으면 그중 가장 작은 값
+        /// (큰 값을 고르면 아직 안 읽은 범위의 행을 건너뛴다). 없으면 null.
+        /// </summary>
+        internal static string Watermark(List<CheckpointRecord> records, string mappingId)
+        {
+            if (records == null)
+            {
+                return null;
+            }
+
+            var single = records.FirstOrDefault(r => string.Equals(r.TaskKey, mappingId, StringComparison.Ordinal));
+            if (single != null && single.Value != null)
+            {
+                return single.Value;
+            }
+
+            var ranges = records.Where(r => r.TaskKey != null && r.TaskKey.StartsWith(mappingId + "#", StringComparison.Ordinal) && r.Value != null).ToList();
+            if (ranges.Count == 0)
+            {
+                return null;
+            }
+
+            var values = ranges.Select(r => r.Value).ToList();
+            if (values.All(v => decimal.TryParse(v, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out _)))
+            {
+                return values.OrderBy(v => decimal.Parse(v, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture)).First();
+            }
+
+            if (values.All(v => DateTime.TryParse(v, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)))
+            {
+                return values.OrderBy(v => DateTime.Parse(v, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None)).First();
+            }
+
+            return values.OrderBy(v => v, StringComparer.Ordinal).First();
         }
 
         private static bool CanSplit(ColumnMetadata column)

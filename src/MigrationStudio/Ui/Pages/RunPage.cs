@@ -520,7 +520,7 @@ namespace MigrationStudio.Ui.Pages
             var modeField = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             modeField.Children.Add(Kit.SectionLabel("실행 모드 (Run Mode)"));
             modeField.Children.Add(modeSeg);
-            var desc = Theme.Secondary(RunLogic.ModeDescription(mode));
+            var desc = Theme.Secondary(RunLogic.ModeDescription(mode, string.Equals(st.Mode, ExecutionModes.Incremental, StringComparison.Ordinal)));
             desc.TextWrapping = TextWrapping.Wrap;
             desc.FontSize = 11.5;
             desc.Margin = new Thickness(0, 6, 0, 0);

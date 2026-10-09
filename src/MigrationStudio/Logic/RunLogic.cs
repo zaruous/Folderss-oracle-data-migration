@@ -219,11 +219,22 @@ namespace MigrationStudio.Logic
 
         public static string ModeDescription(string mode)
         {
+            return ModeDescription(mode, false);
+        }
+
+        /// <summary>실행 모드 설명. 전략이 증분 이관이면 실행·Dry Run은 워터마크(지난 실행의 마지막 키) 다음부터 읽는다는 점을 적는다.</summary>
+        public static string ModeDescription(string mode, bool incremental)
+        {
             switch (mode)
             {
-                case "DRY": return "원본을 읽고 변환·매핑까지만 합니다. 대상에 쓰지 않고 예상 입력·갱신·거부 수를 보여 줍니다.";
-                case "RESUME": return "체크포인트가 있는 작업은 마지막 커밋 키 다음부터(WHERE 키 > :LAST_ID) 이어서 합니다.";
-                default: return "처음부터 실행합니다. MERGE는 이미 있는 행을 갱신하므로 다시 실행해도 중복이 생기지 않습니다.";
+                case "DRY":
+                    return (incremental ? "워터마크 이후 행만 " : "") + "원본을 읽고 변환·매핑까지만 합니다. 대상에 쓰지 않고 예상 입력·갱신·거부 수를 보여 줍니다.";
+                case "RESUME":
+                    return "체크포인트가 있는 작업은 마지막 커밋 키 다음부터(WHERE 키 > :LAST_ID) 이어서 합니다.";
+                default:
+                    return incremental
+                        ? "증분 이관: 매핑의 체크포인트 열 기준으로 지난 실행의 마지막 키(워터마크) 다음 행만 읽습니다. 워터마크가 없는 작업은 처음부터 읽습니다(첫 적재)."
+                        : "처음부터 실행합니다. MERGE는 이미 있는 행을 갱신하므로 다시 실행해도 중복이 생기지 않습니다.";
             }
         }
 

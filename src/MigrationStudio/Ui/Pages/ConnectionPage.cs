@@ -291,7 +291,7 @@ namespace MigrationStudio.Ui.Pages
         {
             if (mode == ExecutionModes.Incremental)
             {
-                return "증분 기준 열·체크포인트로 이어서 읽습니다.";
+                return "매핑의 체크포인트 열 기준으로 지난 실행의 마지막 키(워터마크) 다음 행만 읽습니다. 쓰기 방식은 INSERT+UPDATE를 권장합니다.";
             }
 
             if (mode == ExecutionModes.Cdc)

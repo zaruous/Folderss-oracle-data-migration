@@ -257,6 +257,11 @@ namespace MigrationStudio.Core.Engine
                 startLines.Add("체크포인트에서 재개: " + task.Item.Mapping.CheckpointColumn + " > " + task.Item.ResumeFrom +
                     " · 남은 " + Number(Math.Max(0, task.Item.ScopeTotal - task.Item.BaseRows)) + "행");
             }
+            else if (task.Item.ResumeFrom != null)
+            {
+                startLines.Add("증분: " + task.Item.Mapping.CheckpointColumn + " > " + task.Item.ResumeFrom +
+                    " (워터마크) · 새 " + Number(task.Item.ScopeTotal) + "행");
+            }
             else if (!string.IsNullOrEmpty(task.Item.Mapping.CheckpointColumn))
             {
                 startLines.Add("범위: " + task.Item.Mapping.CheckpointColumn + " 순서로 " + Number(task.Item.ScopeTotal) + "행");
@@ -281,6 +286,17 @@ namespace MigrationStudio.Core.Engine
             if (!IsDry())
             {
                 await _recorder.TaskStartedAsync(_spec, task.Item, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!IsDry() && string.Equals(task.Item.Mapping.Mode, WriteModes.TruncateInsert, StringComparison.Ordinal) && task.Item.ResumeFrom != null && task.Item.BaseRows == 0)
+            {
+                // 워터마크 이후만 읽는 증분에서 TRUNCATE를 하면 대상의 기존 행이 사라지고 새 행만 남는다 — 검증(증분 기준)이 막지만 엔진도 지킨다.
+                task.Status = "failed";
+                task.EndedAt = _clock.Now;
+                Log("ERROR", task.Item.Label + ": 증분 이관(워터마크 " + task.Item.ResumeFrom + ")에서는 TRUNCATE + INSERT를 쓸 수 없음 — INSERT+UPDATE로 바꾸거나 전체 이관으로 실행");
+                await _recorder.TaskEndedAsync(_spec, task.Copy(_clock.Now), CancellationToken.None).ConfigureAwait(false);
+                EmitSnapshot(true);
+                return;
             }
 
             if (!IsDry() && string.Equals(task.Item.Mapping.Mode, WriteModes.TruncateInsert, StringComparison.Ordinal) && task.Item.BaseRows == 0)
@@ -550,8 +566,10 @@ namespace MigrationStudio.Core.Engine
                 else
                 {
                     var item = task.Item;
+                    // 로컬 파일 저장소는 커밋 뒤에 체크포인트를 쓰므로 그 사이에 죽으면 한 배치가 다시 온다 — 재개든 증분(워터마크)이든
+                    // 저장된 키 다음부터 읽는 첫 배치는 MERGE로 써서 중복 키(ORA-00001)를 흡수한다.
                     if (string.Equals(_spec.CheckpointStore, "LOCAL", StringComparison.Ordinal) &&
-                        string.Equals(_spec.RunMode, "RESUME", StringComparison.Ordinal) && task.Commits == 0 &&
+                        task.Item.ResumeFrom != null && task.Commits == 0 &&
                         string.Equals(item.Mapping.Mode, WriteModes.InsertOnly, StringComparison.Ordinal))
                     {
                         item = ResumeMergeItem(item);
