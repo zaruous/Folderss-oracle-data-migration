@@ -41,6 +41,7 @@ namespace MigrationStudio.Tests.Engine
             world.Touch(2, 14);
             world.Touch(5, 15);
             world.Source.Rows.First(r => (decimal)r[0] == 7m)[1] = "SILENT-7";
+            world.SourceNow = Base.AddMinutes(15);
 
             var second = await world.RunAsync(ExecutionModes.Incremental, "EXECUTE");
             Assert.Equal("done", second.Engine.State);
@@ -86,6 +87,7 @@ namespace MigrationStudio.Tests.Engine
             var world = new World(WriteModes.Merge, 10);
             await world.RunAsync(ExecutionModes.Incremental, "EXECUTE");
             world.Source.Rows.Add(Row(11));
+            world.SourceNow = Base.AddMinutes(11);
 
             var dry = await world.RunAsync(ExecutionModes.Incremental, "DRY");
 
@@ -102,6 +104,7 @@ namespace MigrationStudio.Tests.Engine
             var first = await world.RunAsync(ExecutionModes.Incremental, "EXECUTE");
             Assert.Equal("done", first.Engine.State);
             world.Source.Rows.Add(Row(11));
+            world.SourceNow = Base.AddMinutes(11);
 
             var second = await world.RunAsync(ExecutionModes.Incremental, "EXECUTE");
 
@@ -119,6 +122,7 @@ namespace MigrationStudio.Tests.Engine
             world.Source.Rows.Add(Row(11));
             world.Source.Rows.Add(Row(12));
             world.Target.Rows.Add(Row(11));
+            world.SourceNow = Base.AddMinutes(12);
             world.Store.Save(new CheckpointRecord { Job = "JOB", TaskKey = "M1", Column = "UPD_AT", Value = Stamp(10), Status = "done" });
 
             var run = await world.RunAsync(ExecutionModes.Incremental, "EXECUTE");
@@ -126,6 +130,53 @@ namespace MigrationStudio.Tests.Engine
             Assert.Equal("done", run.Engine.State);
             Assert.Equal(0, run.Listener.Final.Tasks[0].Rejected);
             Assert.Equal(12, world.Target.Rows.Count);
+        }
+
+        [Fact]
+        public async Task Lag_window_keeps_late_committed_row_and_never_moves_watermark_backwards()
+        {
+            // 지연 창 없이: 수정시각 09:08인 행 B가 09:10 실행 뒤에 커밋되면(지연 커밋) 워터마크 09:10을 지나쳐 영원히 빠진다
+            var naive = new World(WriteModes.Merge, 10);
+            await naive.RunAsync(ExecutionModes.Incremental, "EXECUTE");
+            naive.Source.Rows.Add(RowAt(22, 8));
+            naive.SourceNow = Base.AddMinutes(16);
+            await naive.RunAsync(ExecutionModes.Incremental, "EXECUTE");
+            Assert.DoesNotContain(naive.Target.Rows, r => (decimal)r[0] == 22m);
+
+            // 지연 창 5분: 상한 = 원본 시각 − 5분. 09:10 실행은 09:05까지만 읽고, B는 09:16 실행(상한 09:11)에서 들어온다
+            var lagged = new World(WriteModes.Merge, 10);
+            Action<MigrationStrategy> lag = s => s.LagSeconds = 300;
+            var first = await lagged.RunAsync(ExecutionModes.Incremental, "EXECUTE", lag, null);
+            Assert.Equal(5, lagged.Target.Rows.Count);
+            Assert.Equal(Stamp(5), (await lagged.Store.GetAsync("JOB", "M1", CancellationToken.None)).Value);
+            Assert.Contains(first.Listener.Logs, l => l.Tag == "START" && l.Text.Contains("지연 창: UPD_AT <= " + Stamp(5), StringComparison.Ordinal));
+
+            lagged.Source.Rows.Add(RowAt(22, 8));
+            lagged.SourceNow = Base.AddMinutes(16);
+            await lagged.RunAsync(ExecutionModes.Incremental, "EXECUTE", lag, null);
+            Assert.Equal(11, lagged.Target.Rows.Count);
+            Assert.Contains(lagged.Target.Rows, r => (decimal)r[0] == 22m);
+            Assert.Equal(Stamp(11), (await lagged.Store.GetAsync("JOB", "M1", CancellationToken.None)).Value);
+
+            // 원본 시계가 뒤로 가도(상한 < 워터마크) 읽을 것이 없을 뿐 워터마크는 그대로
+            lagged.SourceNow = Base.AddMinutes(5);
+            var skewed = await lagged.RunAsync(ExecutionModes.Incremental, "EXECUTE", lag, null);
+            Assert.Equal("done", skewed.Engine.State);
+            Assert.Equal(0, skewed.Listener.Final.Tasks[0].Written);
+            Assert.Equal(Stamp(11), (await lagged.Store.GetAsync("JOB", "M1", CancellationToken.None)).Value);
+        }
+
+        [Fact]
+        public async Task Oracle_source_sql_binds_upper_bound_only_when_window_is_set()
+        {
+            var world = new World(WriteModes.Merge, 3);
+            var run = await world.RunAsync(ExecutionModes.Incremental, "EXECUTE");
+            var plain = MigrationStudio.Core.Adapters.Oracle.Engine.OracleSourceFactory.BuildSql(run.Plan[0], 10, "S", new KeyRange());
+            Assert.DoesNotContain(":UPPER", plain, StringComparison.Ordinal);
+            var windowed = MigrationStudio.Core.Adapters.Oracle.Engine.OracleSourceFactory.BuildSql(run.Plan[0], 10, "S", new KeyRange { Upper = Stamp(10) });
+            Assert.Contains("UPD_AT <= :UPPER", windowed, StringComparison.Ordinal);
+            Assert.Contains("(:LAST_ID IS NULL OR UPD_AT > :LAST_ID)", windowed, StringComparison.Ordinal);
+            Assert.True(windowed.IndexOf("WHERE", StringComparison.Ordinal) < windowed.IndexOf("ORDER BY", StringComparison.Ordinal));
         }
 
         [Fact]
@@ -146,7 +197,12 @@ namespace MigrationStudio.Tests.Engine
 
         internal static object[] Row(int i)
         {
-            return new object[] { (decimal)i, "NAME-" + i, Base.AddMinutes(i) };
+            return RowAt(i, i);
+        }
+
+        internal static object[] RowAt(int id, int minutes)
+        {
+            return new object[] { (decimal)id, "NAME-" + id, Base.AddMinutes(minutes) };
         }
 
         internal static string Stamp(int minutes)
@@ -183,6 +239,9 @@ namespace MigrationStudio.Tests.Engine
             internal MemoryTargetFactory TargetFactory { get; private set; }
             internal MigrationStrategy LastStrategy { get; private set; }
 
+            /// <summary>원본 DB 시각. 행 수정시각(Base + n분)과 같은 시간선 — 행을 넣거나 고친 뒤 그 시각 이상으로 올려야 창 안에 들어온다.</summary>
+            internal DateTime SourceNow { get; set; } = Base.AddMinutes(10);
+
             internal void Touch(int id, int minutes)
             {
                 var row = Source.Rows.First(r => (decimal)r[0] == (decimal)id);
@@ -218,7 +277,7 @@ namespace MigrationStudio.Tests.Engine
                 var job = new MigrationJob
                 {
                     JobName = "JOB",
-                    Strategy = new MigrationStrategy { Mode = strategyMode, CommitSize = 4, FetchSize = 4, Workers = 1, ErrorPolicy = ErrorPolicies.Continue },
+                    Strategy = new MigrationStrategy { Mode = strategyMode, CommitSize = 4, FetchSize = 4, Workers = 1, ErrorPolicy = ErrorPolicies.Continue, LagSeconds = 0 },
                     Mappings = new List<Mapping> { mapping }
                 };
                 if (strategy != null) strategy(job.Strategy);
@@ -238,7 +297,8 @@ namespace MigrationStudio.Tests.Engine
                 var listener = new CaptureListener();
                 Clock = new ManualClock(new DateTime(2026, 10, 9, 10, 0, 0));
                 TargetFactory = new MemoryTargetFactory(Target) { Checkpoints = Store };
-                var engine = new MigrationEngine(spec, new MemorySourceFactory(Source), TargetFactory, Store, listener, Clock);
+                var sourceFactory = new MemorySourceFactory(Source) { Now = () => SourceNow };
+                var engine = new MigrationEngine(spec, sourceFactory, TargetFactory, Store, listener, Clock);
                 if (configure != null) configure(engine);
                 await engine.RunAsync(CancellationToken.None);
                 return new RunResult { Engine = engine, Listener = listener, Plan = plan };

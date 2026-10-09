@@ -266,7 +266,8 @@ namespace MigrationStudio.Core.Jobs
                 ErrorTable = defaults.ErrorTable,
                 Workers = defaults.Workers,
                 PollIntervalSeconds = defaults.PollIntervalSeconds,
-                MaxRunHours = defaults.MaxRunHours
+                MaxRunHours = defaults.MaxRunHours,
+                LagSeconds = defaults.LagSeconds
             };
 
             if (el.ValueKind != JsonValueKind.Object)
@@ -282,6 +283,11 @@ namespace MigrationStudio.Core.Jobs
             if (el.TryGetProperty("maxRunHours", out var maxHours) && maxHours.ValueKind == JsonValueKind.Number)
             {
                 s.MaxRunHours = maxHours.GetInt32();
+            }
+
+            if (el.TryGetProperty("lagSeconds", out var lag) && lag.ValueKind == JsonValueKind.Number)
+            {
+                s.LagSeconds = lag.GetInt32();
             }
 
             if (el.TryGetProperty("mode", out var mode) && mode.ValueKind == JsonValueKind.String)
@@ -774,6 +780,11 @@ namespace MigrationStudio.Core.Jobs
             if (s.MaxRunHours != defaults.MaxRunHours)
             {
                 d["maxRunHours"] = s.MaxRunHours;
+            }
+
+            if (s.LagSeconds != defaults.LagSeconds)
+            {
+                d["lagSeconds"] = s.LagSeconds;
             }
 
             return d;

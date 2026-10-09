@@ -48,6 +48,7 @@ namespace MigrationStudio.Core.Engine
         private long _syncUpdated;
         private long _syncRejected;
         private int _consecutiveFailures;
+        private bool _windowWarned;
         private const int MaxConsecutiveFailures = 5;
 
         /// <summary>주기 사이 대기. 시험에서는 가짜 시계를 움직이는 함수로 바꿔 끼운다.</summary>
@@ -272,6 +273,42 @@ namespace MigrationStudio.Core.Engine
             Finish("stopped", null);
         }
 
+        /// <summary>
+        /// 지연 창 상한. 증분·동기화 전략이고 체크포인트 열이 날짜·시각일 때만: 원본 시각 − 지연 창. 워터마크보다 뒤로 가지 않는다
+        /// (시계가 어긋나거나 지연 창이 주기보다 길면 이번엔 읽을 것이 없고 워터마크는 그대로). 원본 시각을 못 읽으면 창 없이 돈다(한 번 경고).
+        /// </summary>
+        private async Task<string> WindowUpperAsync(PlanItem item, CancellationToken cancellationToken)
+        {
+            var mode = _spec.Job.Strategy != null ? _spec.Job.Strategy.Mode : null;
+            if (!IsSync() && !string.Equals(mode, ExecutionModes.Incremental, StringComparison.Ordinal) && !string.Equals(mode, ExecutionModes.Cdc, StringComparison.Ordinal))
+            {
+                return null;
+            }
+            var column = item.SourceMetadata != null && !string.IsNullOrEmpty(item.Mapping.CheckpointColumn) ? item.SourceMetadata.FindColumn(item.Mapping.CheckpointColumn) : null;
+            var type = column != null && !string.IsNullOrEmpty(column.Type) ? OracleType.Parse(column.Type) : null;
+            if (type == null || !type.IsDate)
+            {
+                return null;
+            }
+            var clock = _source as ISourceClock;
+            if (clock == null)
+            {
+                if (!_windowWarned)
+                {
+                    _windowWarned = true;
+                    Log("WARN", "원본 시각을 읽을 수 없어 지연 창 없이 읽음 — 수정시각보다 커밋이 늦은 행을 놓칠 수 있음");
+                }
+                return null;
+            }
+            var now = await clock.NowAsync(cancellationToken).ConfigureAwait(false);
+            var upper = now.AddSeconds(-LagSeconds());
+            if (item.ResumeFrom != null && DateTime.TryParse(item.ResumeFrom, CultureInfo.InvariantCulture, DateTimeStyles.None, out var watermark) && upper < watermark)
+            {
+                upper = watermark;
+            }
+            return CheckpointValue(new object[] { upper }, 0);
+        }
+
         /// <summary>다음 주기의 계획: 같은 매핑, 워터마크 다음부터, 범위 하나. 읽을 행 수는 미리 세지 않는다(주기마다 COUNT를 돌리지 않기 위해).</summary>
         private static PlanItem NextCycleItem(PlanItem item, string watermark)
         {
@@ -456,6 +493,11 @@ namespace MigrationStudio.Core.Engine
                 startLines.Add("증분: " + task.Item.Mapping.CheckpointColumn + " > " + task.Item.ResumeFrom + " (워터마크)" +
                     (task.Item.ScopeTotal > 0 ? " · 새 " + Number(task.Item.ScopeTotal) + "행" : ""));
             }
+            var upper = await WindowUpperAsync(task.Item, cancellationToken).ConfigureAwait(false);
+            if (upper != null)
+            {
+                startLines.Add("지연 창: " + task.Item.Mapping.CheckpointColumn + " <= " + upper + " (원본 시각 − " + LagSeconds() + "초) — 그 뒤 행은 다음 주기에");
+            }
             else if (!string.IsNullOrEmpty(task.Item.Mapping.CheckpointColumn))
             {
                 startLines.Add("범위: " + task.Item.Mapping.CheckpointColumn + " 순서로 " + Number(task.Item.ScopeTotal) + "행");
@@ -506,6 +548,10 @@ namespace MigrationStudio.Core.Engine
             var ranges = task.Item.Ranges.Count == 0
                 ? new List<KeyRange> { new KeyRange { Rows = Math.Max(0, task.Item.ScopeTotal - task.Item.BaseRows), Last = task.Item.ResumeFrom } }
                 : task.Item.Ranges;
+            foreach (var range in ranges)
+            {
+                range.Upper = upper;
+            }
             task.Ranges = ranges.Select((r, index) => new RangeState(r,
                 ranges.Count == 1 && index == 0 ? task.Item.BaseRows : 0)).ToList();
             lock (_gate) { _activeWorkers = ranges.Count; }
@@ -533,6 +579,18 @@ namespace MigrationStudio.Core.Engine
                     }
                     task.Status = "done";
                     task.EndedAt = _clock.Now;
+                    if (upper != null && !IsDry())
+                    {
+                        // 상한까지 다 읽었으니 워터마크는 마지막 행 값이 아니라 상한이다 — 변경이 없던 주기에도 워터마크가 앞으로 간다.
+                        lock (_gate)
+                        {
+                            foreach (var range in task.Ranges)
+                            {
+                                range.Last = upper;
+                            }
+                            task.Checkpoint = MinimumCheckpoint(task.Ranges);
+                        }
+                    }
                     await FinalizeCheckpointsAsync(task, "done", cancellationToken).ConfigureAwait(false);
                     Log("DONE", task.Item.Label + "  (" + Duration((task.EndedAt - task.StartedAt).TotalSeconds) + ")\n" +
                         (IsDry() ? "예상 " : "") + "Inserted : " + Number(task.Inserted) + "\n" +
@@ -1238,6 +1296,7 @@ namespace MigrationStudio.Core.Engine
         private bool IsSync() { return string.Equals(_spec.RunMode, RunModes.Sync, StringComparison.Ordinal); }
         private TimeSpan PollInterval() { return TimeSpan.FromSeconds(Math.Max(1, _spec.Job.Strategy.PollIntervalSeconds)); }
         private int MaxRunHours() { return Math.Max(0, _spec.Job.Strategy.MaxRunHours); }
+        private int LagSeconds() { return Math.Max(0, _spec.Job.Strategy.LagSeconds); }
         private string StoreText() { return string.Equals(_spec.CheckpointStore, "LOCAL", StringComparison.Ordinal) ? "로컬 파일" : "대상 DB(" + _spec.ControlPrefix + "CHECKPOINT)"; }
         private static string Number(long n) { return n.ToString("N0", CultureInfo.GetCultureInfo("en-US")); }
         private static string Duration(double seconds) { return TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture); }

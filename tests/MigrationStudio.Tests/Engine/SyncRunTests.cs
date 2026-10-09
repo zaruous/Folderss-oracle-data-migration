@@ -37,6 +37,7 @@ namespace MigrationStudio.Tests.Engine
                         world.Source.Rows.Add(IncrementalRunTests.Row(11));
                         world.Source.Rows.Add(IncrementalRunTests.Row(12));
                         world.Touch(3, 13);
+                        world.SourceNow = IncrementalRunTests.Base.AddMinutes(13);
                     }
                     if (sync.Cycle >= 2)
                     {
@@ -70,6 +71,7 @@ namespace MigrationStudio.Tests.Engine
             var world = new World(WriteModes.Merge, 10);
             await world.RunAsync(ExecutionModes.Cdc, RunModes.Sync, null, e => e.CycleDelay = (span, ct) => { e.Stop(); return Task.CompletedTask; });
             world.Source.Rows.Add(IncrementalRunTests.Row(11));
+            world.SourceNow = IncrementalRunTests.Base.AddMinutes(11);
 
             var second = await world.RunAsync(ExecutionModes.Cdc, RunModes.Sync, null, e => e.CycleDelay = (span, ct) => { e.Stop(); return Task.CompletedTask; });
 
@@ -190,6 +192,7 @@ namespace MigrationStudio.Tests.Engine
             var world = new World(WriteModes.Merge, 10);
             await world.RunAsync(ExecutionModes.Cdc, RunModes.Sync, null, e => e.CycleDelay = (span, ct) => { e.Stop(); return Task.CompletedTask; });
             world.Source.Rows.Add(IncrementalRunTests.Row(11));
+            world.SourceNow = IncrementalRunTests.Base.AddMinutes(11);
 
             var run = await world.RunAsync(ExecutionModes.Cdc, RunModes.Sync, s => s.Workers = 4, e => e.CycleDelay = (span, ct) => { e.Stop(); return Task.CompletedTask; });
 

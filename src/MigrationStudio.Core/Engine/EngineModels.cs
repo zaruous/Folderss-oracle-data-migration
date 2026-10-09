@@ -75,6 +75,8 @@ namespace MigrationStudio.Core.Engine
         public long Rows { get; set; }
         public string Last { get; set; }
         public long BaseRows { get; set; }
+        /// <summary>지연 창 상한(체크포인트 열 ≤ 이 값만 읽음). 날짜·시각 체크포인트의 증분·동기화에서만 쓴다.</summary>
+        public string Upper { get; set; }
     }
 
     public sealed class WriteResult
@@ -202,6 +204,12 @@ namespace MigrationStudio.Core.Engine
     public interface ISourceFactory
     {
         Task<ISourceReader> OpenAsync(PlanItem item, KeyRange range, string lastValue, int fetchSize, CancellationToken cancellationToken);
+    }
+
+    /// <summary>원본 DB의 현재 시각. 지연 창 상한은 클라이언트 시계가 아니라 이 값으로 잰다(시계가 다르면 창이 어긋난다).</summary>
+    public interface ISourceClock
+    {
+        Task<DateTime> NowAsync(CancellationToken cancellationToken);
     }
 
     public interface ISourceProbe

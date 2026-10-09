@@ -65,6 +65,31 @@ namespace MigrationStudio.Tests
         }
 
         [Fact]
+        public async Task RunPre_sync_checks_sql_source_password_and_source_clock()
+        {
+            var ctx = SampleContext();
+            ctx.Job.Strategy.Mode = ExecutionModes.Cdc;
+            ctx.Job.Strategy.MaxRunHours = 0;
+            ctx.Job.Mappings.First(m => m.Id == "tm-sql-member").Use = true;
+            ctx.SourceProfile.SavePassword = false;
+            var adapter = Fake(ctx);
+            var inner = adapter.QueryResponder;
+            adapter.QueryResponder = sql => sql.Contains("SYSTIMESTAMP", StringComparison.Ordinal)
+                ? new QueryResult { Columns = new List<QueryColumn>(), Rows = new List<string[]> { new[] { "2026-10-09 10:00:00" } } }
+                : inner(sql);
+            var items = await new ValidationEngine(adapter).RunPreAsync(ctx, null, CancellationToken.None);
+
+            Assert.Contains(items, i => i.Check == "증분 기준" && i.MappingId == "tm-sql-member" && i.Level == CheckLevels.Warn && i.Detail.Contains("SQL 원본"));
+            Assert.Contains(items, i => i.Check == "동기화 접속" && i.Level == CheckLevels.Error && i.MappingId == null);
+            Assert.Contains(items, i => i.Check == "원본 시계" && i.Detail.Contains("2026-10-09 10:00:00"));
+
+            ctx.Job.Strategy.MaxRunHours = 24;
+            var limited = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+            Assert.Contains(limited, i => i.Check == "동기화 접속" && i.Level == CheckLevels.Warn);
+            Assert.DoesNotContain(limited, i => i.Check == "원본 시계");
+        }
+
+        [Fact]
         public async Task RunPre_missing_meta_stops_with_error()
         {
             var ctx = SampleContext();

@@ -139,7 +139,8 @@ namespace MigrationStudio.Ui.Modals
             body.Children.Add(DialogKit.Target(target, "대상" + (production ? " 운영 DB" : "") + "에 주기마다 변경을 반영합니다."));
             var lines = new List<string>
             {
-                "주기: " + strategy.PollIntervalSeconds + "초마다 워터마크 다음 행을 읽어 INSERT+UPDATE",
+                "주기: " + strategy.PollIntervalSeconds + "초마다 워터마크 다음 행을 읽어 INSERT+UPDATE" +
+                    (strategy.LagSeconds > 0 ? " · 지연 창 " + strategy.LagSeconds + "초(날짜 체크포인트는 그만큼 늦게 반영)" : ""),
                 "종료: " + (strategy.MaxRunHours > 0 ? "최대 " + strategy.MaxRunHours + "시간 뒤 자동 종료 (또는 중지 버튼)" : "무기한 — 중지 버튼을 누를 때까지"),
                 "창을 닫으면: " + (string.Equals(agent.OnHostExit, "STOP", System.StringComparison.OrdinalIgnoreCase)
                     ? "Folderss를 닫을 때 함께 중지 (설정 > 에이전트)"

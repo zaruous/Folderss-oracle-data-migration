@@ -65,6 +65,12 @@ namespace MigrationStudio.Core.Model
 
         /// <summary>CDC(변경동기화) 최대 실행 시간(시간). 0이면 무기한 — 사용자가 명시적으로 골랐을 때만.</summary>
         public int MaxRunHours { get; set; } = 24;
+
+        /// <summary>
+        /// 지연 창(초). 체크포인트 열이 날짜·시각이면 "원본 현재 시각 − 지연 창"까지만 읽는다 — 수정시각은 과거인데 커밋이 늦은 행을
+        /// 워터마크가 지나치지 않게. 가장 긴 트랜잭션보다 커야 하고, 그만큼 반영이 늦어진다.
+        /// </summary>
+        public int LagSeconds { get; set; } = 300;
     }
 
     /// <summary>

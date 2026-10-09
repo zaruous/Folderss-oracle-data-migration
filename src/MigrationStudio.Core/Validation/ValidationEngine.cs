@@ -77,6 +77,7 @@ namespace MigrationStudio.Core.Validation
 
             await RunSqlMappingsAsync(ctx, items, onItem, sqls, srcMeta, tgtMeta, ct).ConfigureAwait(false);
             EmitIncrementalChecks(ctx, items, onItem, used, srcMeta);
+            await EmitSyncRunChecksAsync(ctx, items, onItem, ct).ConfigureAwait(false);
 
             Dictionary<string, Dictionary<string, ColumnStats>> measured = null;
             if (ctx.Source != null)
@@ -1030,8 +1031,76 @@ namespace MigrationStudio.Core.Validation
                         : " · INSERT ONLY는 워터마크 이후 행이 모두 새 행일 때만 안전 — 수정된 행도 다시 오면 INSERT+UPDATE";
                 }
 
+                if (tm.IsSql)
+                {
+                    // 조인된 어느 쪽이 바뀌어도 결과 행이 바뀐다 — 수정시각 하나로는 못 잡는다. 사용자가 GREATEST(a.UPD_AT, b.UPD_AT) 같은 결과 열을 만들었을 때만 맞다.
+                    level = CheckLevels.Rank(level) < CheckLevels.Rank(CheckLevels.Warn) ? CheckLevels.Warn : level;
+                    detail += " · SQL 원본: 조인한 모든 테이블의 변경이 체크포인트 열에 반영돼야 함(예: GREATEST(a.UPD_AT, b.UPD_AT))";
+                }
+
+                if (type != null && type.IsDate)
+                {
+                    detail += " · 지연 창 " + ctx.Job.Strategy.LagSeconds + "초(원본 시각 기준)";
+                }
+                else if (ordered)
+                {
+                    detail += " · 숫자 키는 지연 창이 없어 커밋이 늦은 행을 놓칠 수 있음(수정시각 열을 권장)";
+                }
+
                 Emit(items, onItem, Item("매핑", "증분 기준", LabelOf(tm), level, detail,
                     level == CheckLevels.Pass ? null : Fix("columns", tm.Id), tm.Id));
+            }
+        }
+
+        /// <summary>
+        /// 변경동기화(CDC) 실행 조건: 재시작 때 사람이 필요한 "비밀번호 저장 안 함" 접속(무기한이면 ERROR), 원본 시계와 이 PC 시계 차(정보).
+        /// 지연 창은 원본 시계로 재므로 시계 차가 정확성을 해치지는 않지만, 화면의 "다음 주기" 시각은 이 PC 시계라 차이를 알려 둔다.
+        /// </summary>
+        private async Task EmitSyncRunChecksAsync(ValidationContext ctx, List<ValidationItem> items, Action<ValidationItem> onItem, CancellationToken ct)
+        {
+            if (ctx.Job == null || ctx.Job.Strategy == null)
+            {
+                return;
+            }
+
+            var cdc = string.Equals(ctx.Job.Strategy.Mode, ExecutionModes.Cdc, StringComparison.Ordinal);
+            var incremental = string.Equals(ctx.Job.Strategy.Mode, ExecutionModes.Incremental, StringComparison.Ordinal);
+            if (!cdc && !incremental)
+            {
+                return;
+            }
+
+            if (cdc)
+            {
+                var unsaved = new List<string>();
+                if (ctx.SourceProfile != null && !ctx.SourceProfile.SavePassword) unsaved.Add("원본 " + ctx.SourceProfile.Name);
+                if (ctx.TargetProfile != null && !ctx.TargetProfile.SavePassword) unsaved.Add("대상 " + ctx.TargetProfile.Name);
+                if (unsaved.Count > 0)
+                {
+                    var unlimited = ctx.Job.Strategy.MaxRunHours <= 0;
+                    Emit(items, onItem, Item("공간·실행", "동기화 접속", string.Join(", ", unsaved),
+                        unlimited ? CheckLevels.Error : CheckLevels.Warn,
+                        "비밀번호를 저장하지 않는 접속은 에이전트가 다시 시작할 때 사람이 입력해야 함"
+                        + (unlimited ? " — 무기한 동기화에는 쓸 수 없음: 비밀번호를 저장하거나 최대 실행 시간을 두세요" : " — 상시 운영이면 비밀번호 저장을 켜세요"),
+                        Fix("connection")));
+                }
+            }
+
+            if (ctx.Source != null && ctx.SourceMeta != null)
+            {
+                var qr = await SafeQueryAsync(ctx.Source, ctx.SourceMeta.Schema, "SELECT TO_CHAR(SYSTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS') AS NOW_AT FROM DUAL", ct).ConfigureAwait(false);
+                var text = qr != null && qr.Rows != null && qr.Rows.Count > 0 && qr.Rows[0] != null && qr.Rows[0].Length > 0 ? qr.Rows[0][0] : null;
+                DateTime sourceNow;
+                if (!string.IsNullOrEmpty(text) && DateTime.TryParseExact(text, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out sourceNow))
+                {
+                    var skew = (DateTime.Now - sourceNow).TotalSeconds;
+                    var level = Math.Abs(skew) > Math.Max(60, ctx.Job.Strategy.LagSeconds) ? CheckLevels.Warn : CheckLevels.Info;
+                    Emit(items, onItem, Item("공간·실행", "원본 시계", ctx.SourceProfile != null ? ctx.SourceProfile.Name : "", level,
+                        "원본 " + text + " · 이 PC와 " + Math.Round(Math.Abs(skew)).ToString(CultureInfo.InvariantCulture) + "초 차이"
+                        + " — 지연 창(" + ctx.Job.Strategy.LagSeconds + "초)은 원본 시계로 재므로 정확성에는 영향 없음"
+                        + (level == CheckLevels.Warn ? ". 차이가 커서 화면의 다음 주기 시각이 어긋나 보일 수 있음" : ""),
+                        null));
+                }
             }
         }
 

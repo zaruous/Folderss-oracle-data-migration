@@ -155,7 +155,8 @@ namespace MigrationStudio.Core.Jobs
                 ErrorTable = s.ErrorTable,
                 Workers = s.Workers,
                 PollIntervalSeconds = s.PollIntervalSeconds,
-                MaxRunHours = s.MaxRunHours
+                MaxRunHours = s.MaxRunHours,
+                LagSeconds = s.LagSeconds
             };
         }
 

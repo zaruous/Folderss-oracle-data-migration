@@ -284,6 +284,12 @@ namespace MigrationStudio.Ui.Pages
                         ? "지나면 자동 종료합니다. 다시 시작하면 워터마크 다음부터 이어 갑니다."
                         : "무기한: 중지 버튼을 누를 때까지 돕니다. 잊으면 계속 쓰므로 종료 시간을 두는 편이 안전합니다.")));
             }
+
+            if (s.Mode == ExecutionModes.Cdc || s.Mode == ExecutionModes.Incremental)
+            {
+                _strategyHost.Children.Add(Kit.Field("지연 창", LagCombo(s), false,
+                    "체크포인트 열이 날짜·시각이면 원본 시각에서 이만큼 뺀 시각까지만 읽습니다. 수정시각은 과거인데 커밋이 늦은 행을 놓치지 않기 위한 여유로, 가장 긴 트랜잭션보다 길게 두되 그만큼 반영이 늦어집니다."));
+            }
             var prefixBox = new TextBox { Width = 92, FontFamily = Theme.Mono, Text = s.ErrorTable ?? "" };
             prefixBox.TextChanged += (a, b) => { s.ErrorTable = prefixBox.Text; _state.MarkChanged(); };
             var errItems = new List<Kit.RadioCardItem>
@@ -332,6 +338,34 @@ namespace MigrationStudio.Ui.Pages
                 if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
                 {
                     s.PollIntervalSeconds = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                }
+            };
+            return box;
+        }
+
+        private ComboBox LagCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 0, 60, 300, 900, 1800, 3600 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add(n == 0 ? "없음(원본 현재 시각까지)" : n < 60 ? n + "초" : n / 60 + "분");
+            }
+
+            var idx = Array.IndexOf(choices, s.LagSeconds);
+            if (idx < 0)
+            {
+                box.Items.Add(s.LagSeconds + "초");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.LagSeconds = choices[box.SelectedIndex];
                     _state.MarkChanged();
                 }
             };

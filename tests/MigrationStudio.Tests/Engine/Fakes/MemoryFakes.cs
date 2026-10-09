@@ -37,7 +37,7 @@ namespace MigrationStudio.Tests.Engine.Fakes
         }
     }
 
-    internal sealed class MemorySourceFactory : ISourceFactory
+    internal sealed class MemorySourceFactory : ISourceFactory, ISourceClock
     {
         private readonly Dictionary<string, MemoryTable> _tables;
         private int _reads;
@@ -50,12 +50,19 @@ namespace MigrationStudio.Tests.Engine.Fakes
         internal int FailOnRead { get; set; }
         internal int DelayMilliseconds { get; set; }
         internal int ReadCalls { get { return _reads; } }
+        /// <summary>원본 DB 시각(지연 창 상한용). 시험이 시간을 직접 움직인다.</summary>
+        internal Func<DateTime> Now { get; set; } = () => DateTime.Now;
+
+        public Task<DateTime> NowAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Now());
+        }
 
         public Task<ISourceReader> OpenAsync(PlanItem item, KeyRange range, string lastValue, int fetchSize, CancellationToken cancellationToken)
         {
             var table = _tables[item.Mapping.Source];
             var cp = table.Ordinal(item.Mapping.CheckpointColumn);
-            IEnumerable<object[]> selected = cp < 0 ? table.Rows : table.Rows.Where(r => After(r[cp], lastValue) && AtOrAfter(r[cp], range.From) && BeforeOrEqual(r[cp], range.To)).OrderBy(r => r[cp]);
+            IEnumerable<object[]> selected = cp < 0 ? table.Rows : table.Rows.Where(r => After(r[cp], lastValue) && AtOrAfter(r[cp], range.From) && BeforeOrEqual(r[cp], range.To) && BeforeOrEqual(r[cp], range.Upper)).OrderBy(r => r[cp]);
             var rows = selected.Select(r => Project(table, item, r, cp)).ToList();
             var columns = item.WriteColumns.Select(c => c.Name).ToList();
             if (cp >= 0) columns.Add("MIG_CP_HIDDEN");

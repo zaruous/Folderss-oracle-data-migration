@@ -160,8 +160,32 @@ namespace MigrationStudio.Logic
                 return "";
             }
 
-            var names = string.Join(", ", list.Select(r => (string.IsNullOrEmpty(r.JobName) ? "(이름 없음)" : r.JobName) + " · " + r.RunId));
+            return ReattachNoticeText(alive, DateTime.Now);
+        }
+
+        public static string ReattachNoticeText(IList<AgentRunInfo> alive, DateTime now)
+        {
+            var list = AliveForReattach(alive);
+            if (list.Count == 0)
+            {
+                return "";
+            }
+
+            var names = string.Join(", ", list.Select(r => (string.IsNullOrEmpty(r.JobName) ? "(이름 없음)" : r.JobName) + " · " + r.RunId + SyncTail(r, now)));
             return "진행 중인 실행 " + list.Count + "개가 다른 창에서 시작되어 아직 돌고 있습니다: " + names;
+        }
+
+        /// <summary>동기화 실행이면 "마지막 주기 n분 전". 오래됐으면(1시간 넘게) 멈춘 것일 수 있다고 덧붙인다.</summary>
+        private static string SyncTail(AgentRunInfo run, DateTime now)
+        {
+            if (run == null || !run.LastCycleAt.HasValue)
+            {
+                return "";
+            }
+
+            var minutes = Math.Max(0, (now - run.LastCycleAt.Value).TotalMinutes);
+            var ago = minutes < 1 ? "방금" : minutes < 60 ? Math.Floor(minutes) + "분 전" : Math.Floor(minutes / 60) + "시간 전";
+            return " (동기화 주기 " + run.Cycle + " · 마지막 " + ago + (minutes >= 60 ? " — 멈췄을 수 있음, 붙어서 확인" : "") + ")";
         }
 
         public static bool IsActive(string state)

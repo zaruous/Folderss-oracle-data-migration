@@ -237,7 +237,12 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 - 시험: `tests/MigrationStudio.Tests/Engine/SyncRunTests.cs`(주기 반복·워터마크·누적 합계, 두 번째 실행이 워터마크에서 이어 감, 일시 오류 백오프 1분→2분 뒤 성공, 5회 연속 실패 → failed, 설정 오류 즉시 failed, 최대 실행 시간 → done, 주기 사이 일시 정지·재개, 플래너 작업자 1), `AgentRunFilesTests`, `RunLogicTests.Sync_*`, `CoreUnitTests.JobFile_sync_*`, `ValidationEngineTests.RunPre_cdc_*`.
 - 완료 조건: `MigrationEngineTests` — 가짜 시계로 2주기 돌려 각 주기가 그 사이 변경만 쓰는지, `Stop`이 배치 경계에서 멈추고 워터마크가 보존되는지, 가짜 원본이 2회 연속 실패 뒤 성공하면 워터마크 변화 없이 이어 가는지, 재시도 상한 초과 시 `failed`인지, `StopAt` 도달 시 `done`으로 끝나는지. `AgentIntegrationTests` — SYNC 상태로 다시 붙기, 호스트 종료 후에도 살아 있음, `LastCycleAt`이 기록에 남음.
 
-### P8-c 쿼리 폴링 완성(지연 창·원본 시계·검증 C14~C17·접속 능력 감지)
+### P8-c 쿼리 폴링 완성(지연 창·원본 시계·검증 C14~C17·접속 능력 감지) — **구현됨 (2026-10-09, 접속 능력 감지는 P8-d로 이월)**
+- 구현 메모: `Strategy.LagSeconds`(기본 300, 기본값이면 파일에 안 씀). 전략이 INCREMENTAL·CDC이고 체크포인트 열이 날짜·시각이면 엔진이 작업 시작 때 `ISourceClock.NowAsync`(Oracle: `CAST(SYSTIMESTAMP AS TIMESTAMP(6))`)로 원본 시각을 읽어 상한 = 원본 시각 − 지연 창(`KeyRange.Upper`, SQL `cp <= :UPPER`)을 건다. 상한은 워터마크보다 뒤로 가지 않는다. 작업이 끝나면 워터마크 = 상한(변경이 없던 주기에도 전진, 같은 초 경계 중복·누락 없음). 숫자 키는 창 없음(검증에서 안내). 원본 시각을 못 읽으면 창 없이 돌고 한 번 경고. 4.1에서 적었던 "LOWER = 워터마크 − 지연 창(겹쳐 읽기)"은 쓰지 않았다 — 상한을 워터마크로 쓰면 겹쳐 읽을 필요가 없고 MERGE 재적용도 사라진다.
+- 검증: `증분 기준`에 SQL 원본 WARN(조인 테이블 변경 반영 조건)·지연 창 표시·숫자 키 안내. 새 항목 `동기화 접속`(CDC + 비밀번호 저장 안 함 → WARN, 무기한이면 ERROR = C24)·`원본 시계`(원본 SYSTIMESTAMP와 이 PC 시계 차, 지연 창보다 크면 WARN = C17). C16(인덱스 없음)은 메타데이터에 인덱스 정보가 없어 이월.
+- 다시 붙기 안내에 "동기화 주기 n · 마지막 m분 전", 1시간 넘으면 "멈췄을 수 있음". 같은 작업의 중복 실행 차단은 기존 `RunGuard`가 이미 한다(`AlreadyRunningException`).
+- 이월: 3.8 접속 능력 감지는 소비자(삭제 옵션 게이트·플래시백·LogMiner)가 생기는 P8-d에서 함께 만든다.
+- 시험: `IncrementalRunTests.Lag_window_*`(지연 창 없이는 지연 커밋 행이 빠지고, 5분 창에서는 들어오며, 시계가 뒤로 가도 워터마크가 안 내려감), `Oracle_source_sql_binds_upper_bound_*`, `ValidationEngineTests.RunPre_sync_checks_*`, `RunReattachLogicTests.Notice_shows_last_sync_cycle_*`, `CoreUnitTests.JobFile_sync_*`.
 - 4.1 전부, `OracleSourceFactory`에 `:UPPER` 바인딩, SQL 원본 WARN. 3.8 접속 능력 감지(`ConnectionTestResult.Capabilities`, 전략 화면 비활성화 + 툴팁).
 - 완료 조건: `SqlGenerator` 골든 외 신규 테스트로 생성 SQL 확인(`> :LOWER AND <= :UPPER`), 커밋 지연 시나리오(가짜 원본에서 "수정시각은 과거·가시화는 다음 주기"인 행이 지연 창 안에서 잡힘), `ValidationEngineTests`에 C14~C17. 능력 감지: 가짜 어댑터가 `ORA-00942`를 내면 결과가 "모름"이고 "불가"가 아님, 권한 있음 + 설정 부족이 따로 표시됨. Oracle IT: `DATE` 경계 같은 초 행 누락 없음, `MIG_IT_RO`(SELECT만) 계정에서 폴링·대조만 열리고 나머지는 모름/닫힘.
 

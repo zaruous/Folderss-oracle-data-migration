@@ -70,17 +70,21 @@ namespace MigrationStudio.Tests
             var json = JobFile.Serialize(job, settings);
             Assert.DoesNotContain("pollIntervalSeconds", json);
             Assert.DoesNotContain("maxRunHours", json);
+            Assert.DoesNotContain("lagSeconds", json);
             var parsedDefault = JobFile.Parse(json);
             Assert.Equal(60, parsedDefault.Strategy.PollIntervalSeconds);
             Assert.Equal(24, parsedDefault.Strategy.MaxRunHours);
+            Assert.Equal(300, parsedDefault.Strategy.LagSeconds);
 
             job.Strategy.Mode = ExecutionModes.Cdc;
             job.Strategy.PollIntervalSeconds = 300;
             job.Strategy.MaxRunHours = 0;
+            job.Strategy.LagSeconds = 0;
             var parsed = JobFile.Parse(JobFile.Serialize(job, settings));
             Assert.Equal(ExecutionModes.Cdc, parsed.Strategy.Mode);
             Assert.Equal(300, parsed.Strategy.PollIntervalSeconds);
             Assert.Equal(0, parsed.Strategy.MaxRunHours);
+            Assert.Equal(0, parsed.Strategy.LagSeconds);
         }
 
         [Fact]
