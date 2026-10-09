@@ -150,6 +150,26 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 | 로그 증가 | 주기당 로그는 변경이 있을 때만 상세, 없으면 한 줄. `LogDays` 정리는 그대로, 삭제 기록만 예외(3.3) |
 | 운영 대상 | `OnHostExit = CONTINUE`(기본)이면 Folderss를 닫아도 운영 대상에 계속 쓴다. 시작 확인 창 문구에 명시 |
 
+### 3.8 접속 능력 감지 (어느 방식이 되는 계정인지는 환경마다 다르다)
+
+방식을 미리 고정하지 않고, 접속 시험 때 **읽기 전용 조회만으로** 계정이 할 수 있는 것을 검사해 되는 선택지만 연다. 결과는 접속 프로필에 `Capabilities`로 저장하고 전략 화면에서 안 되는 방식은 비활성화 + 이유 툴팁.
+
+| 검사 | 조회 | 열리는 것 | 조회가 실패하면 |
+|---|---|---|---|
+| 원본 테이블 `SELECT` | 기존 메타데이터 읽기 | 폴링, 키·해시 대조 | 지금과 같이 접속 오류 |
+| 테이블별 `FLASHBACK` | `USER_TAB_PRIVS`·`ALL_TAB_PRIVS`, `SESSION_PRIVS`의 `FLASHBACK ANY TABLE` | 플래시백 삭제 감지 | 모름 → 닫음 |
+| `undo_retention` | `V$PARAMETER` | 플래시백 대조 주기 상한 계산 | 모름 → 보수적 기본값(900초)으로 계산하고 표시 |
+| LogMiner 권한 | `SESSION_PRIVS`의 `LOGMINING`·`SELECT ANY TRANSACTION`, `ALL_TAB_PRIVS`의 `DBMS_LOGMNR` EXECUTE | LogMiner **후보** | 모름 → 닫음 |
+| LogMiner DB 설정 | `V$DATABASE.LOG_MODE`·`SUPPLEMENTAL_LOG_DATA_MIN`, 테이블별 `ALL_LOG_GROUPS` | LogMiner **사용 가능**. 빠진 항목은 필요한 DDL 문을 보여 줌(실행하지 않음) | 모름 → "권한은 있으나 설정 확인 불가, DBA에게 확인" |
+| 대상 `CREATE TABLE`·DML | 기존 `CheckControlStoreAsync` + 보관 테이블 항목 | 제어 테이블·`MIG_DELETED_*` | 기존 규칙(로컬 파일) |
+
+규칙:
+- **"모름"과 "불가"를 구분한다.** `V$` 뷰가 안 보여(`ORA-00942`) 검사가 실패한 것은 불가가 아니다. 모름이면 그 방식을 닫되 "DBA에게 확인" 문구를 붙인다. 모름을 불가로 보이면 실제로 되는 환경에서 사용자가 포기한다.
+- **저장한 결과를 믿지 않는다.** 권한은 바뀐다. 실행 전 검증(C18·C19·C21)에서 다시 확인하고, 실행 중 `ORA-01031`(권한 부족)은 재시도하지 않고 멈춘다.
+- **"권한 있음"과 "지금 쓸 수 있음"을 따로 보인다.** `DBMS_LOGMNR` 실행 권한은 있는데 보조 로깅이 꺼진 경우가 흔하다.
+- **검사는 원본에 아무것도 쓰지 않는다.** `START_LOGMNR`를 실제로 호출해 보지 않는다(세션 자원과 권한 오류 로그를 남긴다).
+- 단계: P8-c에서 폴링·플래시백·대상 항목까지, LogMiner 항목은 P8-e 전까지 "모름"으로만 표시.
+
 ---
 
 ## 4. 원천별 상세
@@ -213,9 +233,9 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 - 3.2·3.4·3.7의 엔진·에이전트 변경. UI는 최소(실행 방식 세그먼트 "CDC (변경동기화)", RunPage 회차·지연·마지막 주기 표시, 종료 조건 입력).
 - 완료 조건: `MigrationEngineTests` — 가짜 시계로 2주기 돌려 각 주기가 그 사이 변경만 쓰는지, `Stop`이 배치 경계에서 멈추고 워터마크가 보존되는지, 가짜 원본이 2회 연속 실패 뒤 성공하면 워터마크 변화 없이 이어 가는지, 재시도 상한 초과 시 `failed`인지, `StopAt` 도달 시 `done`으로 끝나는지. `AgentIntegrationTests` — SYNC 상태로 다시 붙기, 호스트 종료 후에도 살아 있음, `LastCycleAt`이 기록에 남음.
 
-### P8-c 쿼리 폴링 완성(지연 창·원본 시계·검증 C14~C17)
-- 4.1 전부, `OracleSourceFactory`에 `:UPPER` 바인딩, SQL 원본 WARN.
-- 완료 조건: `SqlGenerator` 골든 외 신규 테스트로 생성 SQL 확인(`> :LOWER AND <= :UPPER`), 커밋 지연 시나리오(가짜 원본에서 "수정시각은 과거·가시화는 다음 주기"인 행이 지연 창 안에서 잡힘), `ValidationEngineTests`에 C14~C17. Oracle IT: `DATE` 경계 같은 초 행 누락 없음.
+### P8-c 쿼리 폴링 완성(지연 창·원본 시계·검증 C14~C17·접속 능력 감지)
+- 4.1 전부, `OracleSourceFactory`에 `:UPPER` 바인딩, SQL 원본 WARN. 3.8 접속 능력 감지(`ConnectionTestResult.Capabilities`, 전략 화면 비활성화 + 툴팁).
+- 완료 조건: `SqlGenerator` 골든 외 신규 테스트로 생성 SQL 확인(`> :LOWER AND <= :UPPER`), 커밋 지연 시나리오(가짜 원본에서 "수정시각은 과거·가시화는 다음 주기"인 행이 지연 창 안에서 잡힘), `ValidationEngineTests`에 C14~C17. 능력 감지: 가짜 어댑터가 `ORA-00942`를 내면 결과가 "모름"이고 "불가"가 아님, 권한 있음 + 설정 부족이 따로 표시됨. Oracle IT: `DATE` 경계 같은 초 행 누락 없음, `MIG_IT_RO`(SELECT만) 계정에서 폴링·대조만 열리고 나머지는 모름/닫힘.
 
 ### P8-d 삭제 전파 (옵션, 기본 꺼짐)
 - 순서: ① 유령 행 표시(3.6, 삭제 없이도 들어감) + C23 → ② 키·해시 대조(4.2) + `MARK` → ③ `HARD` + 3.3 규칙 전부(▾ 대화상자·C20~C22·첫 실행 Dry Run·상한·보관·로그·되돌리기) → ④ `FLASHBACK` 감지(4.2b)는 요구가 있을 때만.
