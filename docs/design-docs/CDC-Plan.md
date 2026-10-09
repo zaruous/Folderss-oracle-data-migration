@@ -2,9 +2,16 @@
 
 | 항목 | 내용 |
 |---|---|
-| 상태 | **초안 — 결정 대기**(6장의 질문에 답이 나와야 작업 지시서로 쪼갠다) |
-| 작성일 | 2026-10-08 |
+| 상태 | **초안 — 일부 결정됨**(아래 "결정된 것" 참고, 남은 질문은 6장) |
+| 작성일 | 2026-10-08 (10-09 삭제 전파 정책 반영) |
 | 관련 | 기능 설계서 [README.md](README.md) 결정 사항 #7("CDC 1차 제외, 화면 자리만"), UI-MIG-001(이관 전략), UI-MIG-006(실행) |
+
+### 결정된 것 (2026-10-09)
+
+1. 기본 동작은 **추가·변경 반영**(폴링 + MERGE). 원본 SELECT 권한만으로 돌아가는 방식을 기본으로 한다.
+2. **삭제 전파는 옵션이며 기본 꺼짐.** 기능은 제공하되 위험 경고를 확실하게 보여 준다(3.3).
+3. 삭제 전파의 안전장치는 세 층: **삭제 전 보관 → 수행 내역 로그 → 되돌리기**(3.3). 로그만으로는 안전장치로 치지 않는다.
+4. 로그 기반(LogMiner)은 DBA가 DB를 바꿔 주는 환경에서만 되는 방식이므로 별도 단계로 미룬다.
 
 ---
 
@@ -41,9 +48,11 @@
 
 GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(이 플러그인이 캡처를 하지 않음), 이 플랜에서는 뺀다.
 
+**F. 키·해시 비교(스냅샷 차이)** — 표에 없는 여섯째 방식. 원본·대상에서 `키, STANDARD_HASH(쓰기 열…)`을 키 순서로 읽어 병합 비교한다. 원본에만 있으면 INSERT, 대상에만 있으면 DELETE, 해시가 다르면 UPDATE. 권한은 SELECT뿐이고 수정시각 열도 필요 없으며 SQL 원본도 결과 열 기준이라 된다. 비용이 변경량이 아니라 **테이블 크기**에 비례하므로 분 단위 폴링에는 못 쓰고, 시간 단위·야간·수동 "지금 대조"로 돌리는 **삭제·누락 보정용**이다. 허점: 양쪽 값 표현(날짜 형식·숫자 정밀도·NLS)이 다르면 같은 데이터가 매번 UPDATE로 보인다 — 해시 전에 정규화가 필요하고 이 부분이 구현에서 가장 손이 간다.
+
 ### 추천과 그 근거의 약점
 
-- **추천: A(쿼리 폴링)를 "변경 동기화" 1단계로, C(플래시백)를 "삭제 감지" 옵션으로 얹는다.** 둘 다 원본에 손대지 않고(읽기 전용 원칙 유지), 기존 SELECT·MERGE·체크포인트 경로를 그대로 쓴다.
+- **추천: A(쿼리 폴링)를 "변경 동기화" 기본으로, 삭제 감지는 F(키·해시 비교)를 1순위, C(플래시백)를 2순위 옵션으로 얹는다.** 모두 원본에 손대지 않고(읽기 전용 원칙 유지), 기존 SELECT·MERGE·체크포인트 경로를 그대로 쓴다. F를 C보다 앞에 두는 이유는 권한(SELECT만)과 복구 가능성(`UNDO_RETENTION` 의존 없음) 때문이다.
 - 약점: A는 엄밀히 CDC가 아니라 "증분 반복"이다. 로그 기반 CDC(D)를 기대했다면 이 추천은 기대에 못 미친다. D는 운영 DB 권한·아카이브 운영 정책에 묶여 **플러그인 혼자 완결할 수 없고**, 개발 공수의 반 이상이 Oracle 운영 조건 처리에 들어간다. 그래도 D가 필요하면 4장처럼 "키 캡처 전용"으로 좁혀야 현실적이다.
 - E(트리거)는 설계서 7.3 안전장치와 정면 충돌하므로, 사용자가 명시적으로 원하지 않는 한 선택지에서 제외할 것을 권한다.
 
@@ -53,7 +62,8 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 
 ### 3.1 모델·작업 파일
 - `MigrationStrategy`에 추가(모두 선택 필드, `JobFile` 읽기는 `TryGetProperty`라 v2 유지 가능):
-  - `PollIntervalSeconds`(기본 60), `LagSeconds`(지연 창, 기본 300), `DeleteMode`(`NONE`·`SOFT_COLUMN`·`FLASHBACK`), `CdcSource`(`QUERY`·`FLASHBACK`·`LOGMINER`).
+  - `PollIntervalSeconds`(기본 60), `LagSeconds`(지연 창, 기본 300), `CdcSource`(`QUERY`·`LOGMINER`).
+  - 삭제 전파: `DeleteMode`(`NONE` 기본·`SOFT_COLUMN`·`HARD`), `DeleteDetect`(`KEYDIFF`·`FLASHBACK`), `DeleteCheckIntervalMinutes`(대조 주기, 기본 60), `DeleteMaxRatio`(한 번에 지울 수 있는 대상 비율 상한, 기본 0.1), `DeleteKeepDays`(보관 행 보존 일수, 기본 90).
   - `IncrementalBy`의 뜻을 확정: 매핑의 `CheckpointColumn`이 곧 증분 기준이다. 전략 수준 `IncrementalBy`(PK·Timestamp·Sequence·SCN)는 **힌트/기본값**으로만 두거나 없앤다(둘 다 두면 어느 쪽이 맞는지 모호 — 현재 코드가 그 상태).
 - 작업 파일 예제(`JobSamples`)·YAML 쓰기(`JobFile` 748행 근처)·골든 테스트 영향 확인. 골든은 바꾸지 않고 새 필드는 기본값일 때 쓰지 않는다.
 
@@ -68,6 +78,20 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 - SYNC는 **MERGE만 허용**. INSERT ONLY는 두 번째 주기부터 중복 키, TRUNCATE/DELETE+INSERT는 매 주기 대상을 비운다. 검증에서 ERROR.
 - DELETE 전파용 `ITargetSession.DeleteKeysAsync(item, keys)` 추가(`OracleTargetFactory`에 `DELETE … WHERE 키 = :k` 배열 바인딩). `DeleteMode = SOFT_COLUMN`이면 삭제 대신 지정 열 UPDATE.
 
+#### 삭제 전파 규칙 (결정됨)
+
+| 항목 | 규칙 |
+|---|---|
+| 기본값 | 꺼짐(`NONE`). 작업을 새로 만들 때 한 번 "삭제도 따라갈지"를 묻는다 — 전체 적재 직후 켜면 첫 대조에서 지울 것이 없어 **나중에 켜는 것보다 안전**하다 |
+| 켜는 방법 | 실행 버튼 옆 ▾ 옵션 대화상자(`GitForceConfirmDialog` 방식). 기본 꺼짐 + 경고 문구 + 확인 체크. 대상이 운영(빨강)이면 추가 경고 |
+| 켤 수 있는 매핑 | **조건(`Where`) 없는 1:1 매핑, 그 대상 테이블을 쓰는 매핑이 하나뿐일 때만.** 조건이 있거나 같은 대상에 매핑이 둘이면(예제의 `TB_MEMBER`) "대상에만 있는 행"이 삭제가 아니라 조건 밖·다른 매핑의 행일 수 있어 ERROR(C20). 그 경우 `SOFT_COLUMN`만 허용 |
+| 첫 실행 | 켠 뒤 첫 대조는 **무조건 Dry Run**: 지울 행 수와 표본 키를 보여 주고 사용자가 승인한 뒤에만 실제 삭제. 오래 꺼 두었다가 켤 때 쌓인 차이를 한 번에 지우는 것이 가장 위험한 순간이다 |
+| 건수 상한 | 지울 행이 대상의 `DeleteMaxRatio`를 넘으면 삭제하지 않고 멈춘다. 매핑 조건·다중 매핑·원본 접속 오류(빈 원본)를 의심하라고 안내 |
+| 삭제 전 보관 (1층) | 지울 행의 **전체 값**을 먼저 복사: 대상 DB `MIG_DELETED_<테이블>`(오류 테이블 `ERR$_`와 같은 명명·생성 규칙, `RUN_ID`·`DELETED_AT` 열 추가). 대상에 CREATE TABLE 권한이 없으면 로컬 파일(`DataDirectory\deleted\<작업>\<RUN_ID>.json`). **복사 → 삭제 → 커밋을 같은 트랜잭션**으로 묶어 "보관 없이 지워진 행"이 생기지 않게 한다. 복사 실패 = 삭제 안 함 |
+| 수행 내역 로그 (2층) | `RUN_ID`, 매핑, Dry Run 건수, 승인 시각, 실제 삭제 건수, 삭제 키 목록 파일 경로를 실행 로그와 `MIG_RUN_TASK`에 남긴다. 삭제 기록은 `AgentSettings.LogDays` 자동 정리 **대상에서 뺀다**(별도 `DeleteKeepDays`) |
+| 되돌리기 (3층) | 실행 화면 체크포인트 카드 옆에 "삭제 되돌리기…": 보관 테이블·파일에서 `RUN_ID`를 골라 대상에 다시 INSERT. 수동 SQL에 맡기면 사고 때 실수가 난다 |
+| 민감 정보 | 보관 행에 개인정보가 들어간다. 대상 DB 보관을 기본으로 하고 로컬 파일은 권한이 없을 때만, 보존 일수 뒤 정리. 로컬 파일 경로를 실행 로그에 남겨 어디 있는지 알 수 있게 한다 |
+
 ### 3.4 에이전트·호스트
 - `AgentHost`: `SYNC`는 `done`이 없다. 종료는 `stopped`(사용자) 또는 `failed`만. `--idle-exit`는 적용하지 않는다.
 - `AgentRunInfo.State`에 `syncing` 추가 → 다시 붙기 목록·`RunPage` 배지·`MIG_RUN.STATUS` 매핑.
@@ -81,12 +105,17 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 | C15 | 증분 기준 열 없음·형식이 DATE/TIMESTAMP/NUMBER 아님·NULL 허용 열 | ERROR / WARN(NULL 허용) |
 | C16 | 증분 기준 열에 인덱스 없음(매 주기 풀 스캔) | WARN |
 | C17 | 원본·클라이언트 시계 차(원본 `SYSTIMESTAMP`와 비교, 정보성) | INFO |
-| C18 | `DeleteMode = FLASHBACK`: `FLASHBACK` 권한, `UNDO_RETENTION` 값, `PollInterval < UNDO_RETENTION/2` | ERROR / WARN |
+| C18 | `DeleteDetect = FLASHBACK`: `FLASHBACK` 권한, `UNDO_RETENTION` 값, `DeleteCheckInterval < UNDO_RETENTION/2` | ERROR / WARN |
 | C19 | LogMiner 선택 시: ARCHIVELOG, 보조 로깅, 권한, 컨테이너 종류 | ERROR |
+| C20 | `DeleteMode = HARD`인데 매핑에 `Where`가 있거나 같은 대상 테이블을 쓰는 매핑이 둘 이상 | ERROR |
+| C21 | `DeleteMode = HARD`: 보관 테이블을 만들 수 없고(권한) 로컬 보관도 꺼져 있음 | ERROR |
+| C22 | `DeleteDetect = KEYDIFF`: 해시 대상 열에 정규화 불가 형식(LOB·TIMESTAMP WITH TIME ZONE 등) | WARN |
 
 ### 3.6 화면
 - `ConnectionPage.RebuildStrategy()`: `CDC` 세그먼트 선택 시 안내문 대신 폴링 주기·지연 창·삭제 처리·변경 원천 필드. 라벨은 "변경 동기화"로 바꾸는 편이 정직하다(A 방식은 로그 기반 CDC가 아니므로).
 - `RunPage`: 회차·지연·다음 주기 카운트다운, "동기화 중지" 버튼(Stop과 같음), 체크포인트 카드에 워터마크 표시.
+- **유령 행 표시(삭제 꺼짐일 때 필수)**: 실행 화면과 실행 후 검증(P01 행 수 비교)에 "삭제 전파 꺼짐 · 원본 n / 대상 m (차이 k)"를 항상 보이고 차이가 늘면 WARN. 삭제를 끈 것이 조용히 묻히는 것이 가장 큰 위험이다.
+- 오래 멈췄다가 다시 시작할 때(워터마크가 지연 창의 N배 이상 뒤처짐) "지난 실행 이후 x시간 분량을 한 번에 반영합니다" 안내.
 - `README.md` 한계 항목("CDC 미지원") 갱신, 설계서 결정 사항 #7 갱신.
 
 ---
@@ -106,7 +135,16 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 - `DATE` 열은 초 단위라 같은 초에 들어온 행을 경계에서 나눌 수 없다 → `>` 대신 `>=`로 겹쳐 읽는 것이 필수(2번의 LOWER가 그 역할).
 - SQL 원본(JOIN)은 "조인된 어느 쪽이 바뀌어도 결과 행이 바뀐다"를 수정시각 하나로 표현할 수 없다. SQL 원본은 `GREATEST(a.UPD, b.UPD) AS UPD_AT` 같은 결과 열을 사용자가 만들었을 때만 허용하고 WARN을 낸다.
 
-### 4.2 C. 플래시백 버전 조회 (삭제 감지 옵션)
+### 4.2 F. 키·해시 비교 (삭제 감지 1순위)
+대조 1회(작업 하나 기준):
+1. 원본: 기존 `BuildSourceSelect` 결과 열(변환식 적용 뒤)을 `키 ORDER BY` 로 읽되, 값 대신 `키, STANDARD_HASH(정규화(열1) || '|' || 정규화(열2) …)`만 가져온다. 대상: 같은 열을 같은 정규화로 해시. 정규화 = 날짜 `TO_CHAR(…, 'YYYYMMDDHH24MISSFF6')`, 숫자 `TO_CHAR(…, 'TM9')`, 문자 `NVL(…, '')`.
+2. 양쪽을 키 순서로 스트리밍 병합: 대상에만 있는 키 → 삭제 후보, 해시 다름 → MERGE 재적용, 원본에만 있음 → MERGE.
+3. 큰 테이블은 키 범위를 나눠(기존 `RangesAsync` 재사용) 범위별 집계 해시(`SUM(ORA_HASH(...))`)를 먼저 비교하고 다른 범위만 행 단위로 내려간다.
+4. 삭제 후보는 3.3 규칙(상한·Dry Run·보관)을 거쳐 `DeleteKeysAsync`.
+
+허점: 대조 중 바뀐 행은 다음 대조에서 잡힌다(즉시성 없음). 비용은 원본 부하로 그대로 간다 — 테이블별 대조 주기 설정이 필요하다. 정규화가 틀리면 매번 전체 UPDATE가 나므로 Oracle IT 테스트로 형식별 "같은 데이터 = 같은 해시"를 고정한다.
+
+### 4.2b C. 플래시백 버전 조회 (삭제 감지 2순위)
 - 주기마다 `SELECT 키열, VERSIONS_OPERATION, VERSIONS_ENDSCN FROM 원본 VERSIONS BETWEEN SCN :LAST AND :NOW WHERE VERSIONS_OPERATION = 'D'`로 삭제 키만 뽑아 대상에서 지운다. 워터마크는 SCN(`DBMS_FLASHBACK.GET_SYSTEM_CHANGE_NUMBER` 또는 `V$DATABASE.CURRENT_SCN`, 권한 없으면 `TIMESTAMP_TO_SCN`).
 - INSERT·UPDATE까지 이 경로로 가져올 수도 있으나(수정시각 열이 없는 테이블에 유효), 매 주기 비용이 풀 스캔급이라 **삭제 감지 전용**으로 쓰는 것을 전제한다.
 - 멈춘 시간이 `UNDO_RETENTION`을 넘으면 ORA-01555. 이때 할 수 있는 것은 "전체 재적재(TRUNCATE+INSERT 또는 MERGE 전체)"뿐이고, 사용자에게 선택 창을 띄운다(자동 재적재 금지 — 운영 대상이면 위험).
@@ -147,9 +185,14 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 - 4.1 전부, `OracleSourceFactory`에 `:UPPER` 바인딩, SQL 원본 WARN.
 - 완료 조건: `SqlGenerator` 골든 외 신규 테스트로 생성 SQL 확인(`> :LOWER AND <= :UPPER`), 커밋 지연 시나리오(가짜 원본에서 "수정시각은 과거·가시화는 다음 주기"인 행이 지연 창 안에서 잡힘), `ValidationEngineTests`에 C14~C17. Oracle IT: `DATE` 경계 같은 초 행 누락 없음.
 
-### P8-d 삭제 전파(소프트 열 → 플래시백)
-- `DeleteKeysAsync`, `SOFT_COLUMN`, 그 다음 `FLASHBACK`(C18, ORA-01555 → 선택 창).
-- 완료 조건: 가짜 대상에서 삭제 키가 지워지는 테스트, Oracle IT에서 `VERSIONS BETWEEN SCN`으로 삭제 1건 감지.
+### P8-d 삭제 전파 (옵션, 기본 꺼짐)
+- 순서: ① 유령 행 표시(3.6, 삭제 없이도 들어감) → ② `SOFT_COLUMN` → ③ 키·해시 대조(4.2) + `HARD` + 3.3 규칙 전부(▾ 대화상자·C20~C22·첫 실행 Dry Run·상한·보관·로그·되돌리기) → ④ `FLASHBACK` 감지(4.2b)는 요구가 있을 때만.
+- 완료 조건(자동 시험):
+  - `MigrationEngineTests`: 원본에서 2행 삭제 → 삭제 꺼짐이면 대상 유지 + 스냅샷에 차이 2 표시 / 켜짐이면 Dry Run이 2건 보고하고 승인 전 대상 불변 / 승인 뒤 보관 테이블(가짜)에 2행 복사된 **뒤** 대상에서 삭제 / 보관 실패 시 삭제 0건.
+  - 상한: 대상 100행 중 원본에 없는 행 20행, `DeleteMaxRatio = 0.1` → 삭제 0건 + 중단 사유.
+  - 자격: `Where`가 있는 매핑, 같은 대상에 매핑 둘 → `ValidationEngineTests` C20 ERROR.
+  - 되돌리기: 보관에서 `RUN_ID`로 2행 복원 → 대상 행 수 원복.
+  - Oracle IT: DATE·NUMBER·VARCHAR2 열의 같은 데이터가 양쪽에서 같은 해시, 삭제 1건이 `MIG_DELETED_*`에 남고 같은 트랜잭션으로 커밋.
 
 ### P8-e LogMiner (선택, 6장 답에 따라)
 - 4.3. 시험 환경 구축이 선행 작업.
@@ -164,8 +207,9 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 플랜의 절반은 이 답에 달려 있다. 답 없이 코드를 시작하면 추측으로 간다.
 
 1. **"CDC"가 뜻하는 것**: 수정시각 기반 주기 동기화(A)로 충분한가, 로그 기반(D)이 요구인가? 요구가 D라면 원본 운영 DBA에게 ARCHIVELOG·보조 로깅·`LOGMINING` 권한을 받을 수 있는가?
-2. **삭제 전파가 필요한가?** 필요하면 원본에 삭제 플래그 열이 있는가(SOFT), 없으면 플래시백(C)으로 가도 되는가(UNDO_RETENTION 값 확인 필요).
+2. ~~삭제 전파가 필요한가?~~ **결정됨**: 옵션 제공, 기본 꺼짐, 감지는 키·해시 대조 1순위(3.3·4.2). 남은 질문: 원본에 삭제 플래그 열이 있는 테이블이 있는가(`SOFT_COLUMN` 우선 적용 대상).
 3. **원본에 어떤 변경도 못 하는가?** (트리거·보조 로깅 DDL 모두 불가인지) — 불가면 E와 D는 사실상 제외.
 4. **대상 Oracle 버전·멀티테넌트 여부**(원본 쪽): 19c PDB면 LogMiner 접속 방식이 달라진다.
 5. **운영 방식**: 동기화를 몇 분 주기로, 얼마나 오래(마이그레이션 전환 기간 며칠 vs 상시 복제) 돌릴 것인가? 상시 복제면 Folderss 플러그인(사용자 PC의 하위 프로세스)이 맞는 자리인지부터 의문이다 — PC가 꺼지면 멈춘다.
 6. **라벨**: A로 간다면 화면 라벨을 "CDC" 대신 "변경 동기화"로 바꾸는 데 동의하는가(기대치 관리).
+7. **보관 테이블 위치**: 운영 대상 DB에 `MIG_DELETED_*` 테이블을 만들어도 되는가(제어 테이블 `MIG_*`와 같은 쟁점, 설계서 결정 사항 #2). 안 되면 로컬 파일 보관만 가능하고 다른 PC에서 되돌리기가 안 된다.
