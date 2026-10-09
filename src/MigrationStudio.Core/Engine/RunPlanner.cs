@@ -82,9 +82,15 @@ namespace MigrationStudio.Core.Engine
                 item.TargetRowsBefore = await probe.ExistingKeyCountAsync(item, cancellationToken).ConfigureAwait(false);
 
                 var workers = Math.Max(1, job.Strategy.Workers);
+                var sync = string.Equals(runMode, RunModes.Sync, StringComparison.Ordinal);
+                if (sync && workers > 1)
+                {
+                    // 주기당 변경량은 작고, 주기 사이 워터마크는 범위 없이 하나여야 다음 주기가 이어진다 — 동기화는 작업자 1로 돈다.
+                    workers = 1;
+                }
                 CheckpointRecord checkpoint = null;
                 var records = new List<CheckpointRecord>();
-                var incremental = IsIncremental(job) && !string.Equals(runMode, "RESUME", StringComparison.Ordinal);
+                var incremental = sync || (IsIncremental(job) && !string.Equals(runMode, "RESUME", StringComparison.Ordinal));
                 if (incremental)
                 {
                     // 증분 이관: 지난 실행이 끝났어도(done) 저장된 마지막 키가 워터마크다. 그 다음 키부터만 읽고,

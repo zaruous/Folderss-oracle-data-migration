@@ -336,6 +336,13 @@ namespace MigrationAgent
         internal void OnSnapshot(RunSnapshot snapshot)
         {
             _lastSnapshot = snapshot;
+            // 동기화는 몇 시간씩 돈다 — 주기가 끝날 때마다 기록 파일에 남겨 두면, 붙지 않은 상태에서도 "마지막 주기가 언제였나"를 알 수 있다.
+            if (snapshot != null && snapshot.Sync != null && snapshot.Sync.LastCycleAt.HasValue && snapshot.Sync.Cycle != _record.Cycle)
+            {
+                _record.Cycle = snapshot.Sync.Cycle;
+                _record.LastCycleAt = snapshot.Sync.LastCycleAt;
+                WriteRecord();
+            }
             EnqueueSnapshot(new AgentMessage { Type = AgentMessageTypes.Snapshot, Snapshot = snapshot });
         }
 

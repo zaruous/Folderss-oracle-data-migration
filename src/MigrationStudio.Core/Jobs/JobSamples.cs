@@ -153,7 +153,9 @@ namespace MigrationStudio.Core.Jobs
                 FetchSize = s.FetchSize,
                 ErrorPolicy = s.ErrorPolicy,
                 ErrorTable = s.ErrorTable,
-                Workers = s.Workers
+                Workers = s.Workers,
+                PollIntervalSeconds = s.PollIntervalSeconds,
+                MaxRunHours = s.MaxRunHours
             };
         }
 

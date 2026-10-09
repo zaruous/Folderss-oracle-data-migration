@@ -54,6 +54,17 @@ namespace MigrationStudio.Tests
         }
 
         [Fact]
+        public async Task RunPre_cdc_warns_insert_only_mapping()
+        {
+            var ctx = SampleContext();
+            ctx.Job.Strategy.Mode = ExecutionModes.Cdc;
+            var items = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+            // tm-order는 INSERT ONLY — 변경동기화에서는 수정된 행이 다시 올 때 중복 키라 WARN
+            Assert.Contains(items, i => i.Check == "증분 기준" && i.MappingId == "tm-order" && i.Level == CheckLevels.Warn && i.Detail.Contains("ORA-00001"));
+            Assert.Contains(items, i => i.Check == "증분 기준" && i.MappingId == "tm-customer" && i.Level == CheckLevels.Pass);
+        }
+
+        [Fact]
         public async Task RunPre_missing_meta_stops_with_error()
         {
             var ctx = SampleContext();

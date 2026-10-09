@@ -19,6 +19,50 @@ namespace MigrationStudio.Tests
         }
 
         [Fact]
+        public void Sync_gate_comes_last_and_only_outside_dry_run()
+        {
+            var i = Inputs();
+            i.IsSync = true;
+            i.DestructiveLabels.Add("TRUNCATE + INSERT  X.Y");
+            Assert.Equal(StartGate.ConfirmDestructive, RunLogic.NextStartGate(i));
+            i.DestructiveAccepted = true;
+            Assert.Equal(StartGate.ConfirmSync, RunLogic.NextStartGate(i));
+            i.SyncAccepted = true;
+            Assert.Equal(StartGate.Proceed, RunLogic.NextStartGate(i));
+            var dry = Inputs("DRY");
+            dry.IsSync = true;
+            Assert.Equal(StartGate.Proceed, RunLogic.NextStartGate(dry));
+        }
+
+        [Fact]
+        public void Mode_description_follows_strategy_mode()
+        {
+            Assert.Contains("주기", RunLogic.ModeDescription("EXECUTE", ExecutionModes.Cdc));
+            Assert.Contains("워터마크", RunLogic.ModeDescription("DRY", ExecutionModes.Cdc));
+            Assert.Contains("워터마크", RunLogic.ModeDescription("EXECUTE", ExecutionModes.Incremental));
+            Assert.DoesNotContain("워터마크", RunLogic.ModeDescription("EXECUTE", ExecutionModes.Full));
+        }
+
+        [Fact]
+        public void Sync_summary_shows_cycle_next_time_and_totals()
+        {
+            Assert.Null(RunLogic.SyncSummary(new RunSnapshot(), new System.DateTime(2026, 10, 9, 10, 0, 0)));
+            var snap = new RunSnapshot
+            {
+                Sync = new SyncSnapshot
+                {
+                    Cycle = 3, Phase = "waiting", NextCycleAt = new System.DateTime(2026, 10, 9, 10, 1, 0),
+                    LastCycleAt = new System.DateTime(2026, 10, 9, 10, 0, 0), Inserted = 1200, Updated = 34, ConsecutiveFailures = 1
+                }
+            };
+            var text = RunLogic.SyncSummary(snap, new System.DateTime(2026, 10, 9, 10, 0, 30));
+            Assert.Contains("주기 3 완료", text);
+            Assert.Contains("다음 주기 10:01:00 (00:00:30 뒤)", text);
+            Assert.Contains("누적 삽입 1,200 · 갱신 34", text);
+            Assert.Contains("일시 오류 1회 연속", text);
+        }
+
+        [Fact]
         public void Controls_follow_state()
         {
             var idle = RunLogic.Controls(RunStates.Idle, true);

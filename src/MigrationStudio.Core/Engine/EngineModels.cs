@@ -19,6 +19,15 @@ namespace MigrationStudio.Core.Engine
         }
     }
 
+    /// <summary>실행 모드(RunSpec.RunMode). SYNC는 CDC(변경동기화): 워터마크 이후 행을 주기마다 반복해서 읽는다.</summary>
+    public static class RunModes
+    {
+        public const string Dry = "DRY";
+        public const string Execute = "EXECUTE";
+        public const string Resume = "RESUME";
+        public const string Sync = "SYNC";
+    }
+
     public sealed class EndpointSpec
     {
         public ConnectionTarget Connection { get; set; }
@@ -116,6 +125,25 @@ namespace MigrationStudio.Core.Engine
         public List<TaskSnapshot> Tasks { get; set; } = new List<TaskSnapshot>();
         public PipelineSnapshot Pipeline { get; set; } = new PipelineSnapshot();
         public TotalsSnapshot Totals { get; set; } = new TotalsSnapshot();
+        /// <summary>SYNC(변경동기화)일 때만. 주기 번호·시각과 주기 누적 합계.</summary>
+        public SyncSnapshot Sync { get; set; }
+    }
+
+    public sealed class SyncSnapshot
+    {
+        /// <summary>지금 돌고 있거나 마지막으로 끝난 주기 번호(1부터).</summary>
+        public int Cycle { get; set; }
+        /// <summary>cycle(주기 실행 중) · waiting(다음 주기 대기).</summary>
+        public string Phase { get; set; }
+        public DateTime? LastCycleAt { get; set; }
+        public DateTime? NextCycleAt { get; set; }
+        public int IntervalSeconds { get; set; }
+        public int MaxRunHours { get; set; }
+        public long Written { get; set; }
+        public long Inserted { get; set; }
+        public long Updated { get; set; }
+        public long Rejected { get; set; }
+        public int ConsecutiveFailures { get; set; }
     }
 
     public sealed class TaskSnapshot

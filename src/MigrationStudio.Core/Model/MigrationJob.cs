@@ -59,6 +59,12 @@ namespace MigrationStudio.Core.Model
         /// <summary>오류 테이블 이름 또는 접두어(끝이 _면 접두어: ERR$_ → ERR$_TB_MEMBER).</summary>
         public string ErrorTable { get; set; } = "ERR$_";
         public int Workers { get; set; } = 4;
+
+        /// <summary>CDC(변경동기화)에서 주기 사이 대기 초. 주기마다 워터마크 이후 행을 읽어 MERGE한다.</summary>
+        public int PollIntervalSeconds { get; set; } = 60;
+
+        /// <summary>CDC(변경동기화) 최대 실행 시간(시간). 0이면 무기한 — 사용자가 명시적으로 골랐을 때만.</summary>
+        public int MaxRunHours { get; set; } = 24;
     }
 
     /// <summary>

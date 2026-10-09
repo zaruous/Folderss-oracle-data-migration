@@ -42,5 +42,8 @@ namespace MigrationStudio.Core.Hosting
         public string State { get; set; }
         public string JobName { get; set; }
         public string Message { get; set; }
+        /// <summary>변경동기화(SYNC)일 때 마지막으로 끝난 주기 번호·시각. 다시 붙기 전에 "얼마나 전에 돌았나"를 보기 위한 값.</summary>
+        public int Cycle { get; set; }
+        public DateTime? LastCycleAt { get; set; }
     }
 }

@@ -264,12 +264,24 @@ namespace MigrationStudio.Core.Jobs
                 FetchSize = defaults.FetchSize,
                 ErrorPolicy = defaults.ErrorPolicy,
                 ErrorTable = defaults.ErrorTable,
-                Workers = defaults.Workers
+                Workers = defaults.Workers,
+                PollIntervalSeconds = defaults.PollIntervalSeconds,
+                MaxRunHours = defaults.MaxRunHours
             };
 
             if (el.ValueKind != JsonValueKind.Object)
             {
                 return s;
+            }
+
+            if (el.TryGetProperty("pollIntervalSeconds", out var poll) && poll.ValueKind == JsonValueKind.Number)
+            {
+                s.PollIntervalSeconds = poll.GetInt32();
+            }
+
+            if (el.TryGetProperty("maxRunHours", out var maxHours) && maxHours.ValueKind == JsonValueKind.Number)
+            {
+                s.MaxRunHours = maxHours.GetInt32();
             }
 
             if (el.TryGetProperty("mode", out var mode) && mode.ValueKind == JsonValueKind.String)
@@ -742,7 +754,7 @@ namespace MigrationStudio.Core.Jobs
         private static Dictionary<string, object> StrategyDict(MigrationStrategy s)
         {
             s = s ?? new MigrationStrategy();
-            return new Dictionary<string, object>(StringComparer.Ordinal)
+            var d = new Dictionary<string, object>(StringComparer.Ordinal)
             {
                 { "mode", s.Mode },
                 { "incrementalBy", s.IncrementalBy },
@@ -752,6 +764,19 @@ namespace MigrationStudio.Core.Jobs
                 { "errorTable", s.ErrorTable },
                 { "workers", s.Workers }
             };
+            // 동기화 항목은 기본값이 아닐 때만 쓴다 — 기존 작업 파일(v2)·골든 모양을 바꾸지 않기 위해
+            var defaults = new MigrationStrategy();
+            if (s.PollIntervalSeconds != defaults.PollIntervalSeconds)
+            {
+                d["pollIntervalSeconds"] = s.PollIntervalSeconds;
+            }
+
+            if (s.MaxRunHours != defaults.MaxRunHours)
+            {
+                d["maxRunHours"] = s.MaxRunHours;
+            }
+
+            return d;
         }
 
         private static Dictionary<string, object> MappingDict(Model.Mapping m)

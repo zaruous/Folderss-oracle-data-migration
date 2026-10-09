@@ -79,7 +79,9 @@ namespace MigrationStudio.Logic
         AskValidateFirst,
         Blocked,
         ConfirmStale,
-        ConfirmDestructive
+        ConfirmDestructive,
+        /// <summary>CDC(변경동기화) 시작: 창을 닫아도 계속 도는 실행이라 주기·종료 조건·대상을 보여 주고 확인을 받는다.</summary>
+        ConfirmSync
     }
 
     public sealed class StartInputs
@@ -97,6 +99,9 @@ namespace MigrationStudio.Logic
         public bool SkipValidateAsk { get; set; }
         public bool StaleAccepted { get; set; }
         public bool DestructiveAccepted { get; set; }
+        /// <summary>전략이 CDC(변경동기화)이고 Dry Run이 아님 — 주기 반복 실행.</summary>
+        public bool IsSync { get; set; }
+        public bool SyncAccepted { get; set; }
     }
 
     /// <summary>실행 화면의 순수 논리(WPF 없음, 시험 대상).</summary>
@@ -220,6 +225,56 @@ namespace MigrationStudio.Logic
         public static string ModeDescription(string mode)
         {
             return ModeDescription(mode, false);
+        }
+
+        /// <summary>전략 모드(FULL·INCREMENTAL·CDC)에 맞는 실행 모드 설명.</summary>
+        public static string ModeDescription(string mode, string strategyMode)
+        {
+            if (string.Equals(strategyMode, ExecutionModes.Cdc, System.StringComparison.Ordinal))
+            {
+                if (mode == "DRY")
+                {
+                    return ModeDescription(mode, true);
+                }
+
+                return "CDC(변경동기화): 워터마크 다음 행을 읽어 반영한 뒤 주기만큼 기다렸다가 반복합니다. 중지하거나 최대 실행 시간이 될 때까지 계속 돌고, 창을 닫아도 에이전트가 계속합니다.";
+            }
+
+            return ModeDescription(mode, string.Equals(strategyMode, ExecutionModes.Incremental, System.StringComparison.Ordinal));
+        }
+
+        /// <summary>진행 카드의 동기화 한 줄. SYNC가 아니면 null.</summary>
+        public static string SyncSummary(RunSnapshot snap, System.DateTime now)
+        {
+            if (snap == null || snap.Sync == null)
+            {
+                return null;
+            }
+
+            var s = snap.Sync;
+            var text = "주기 " + s.Cycle;
+            if (s.Phase == "waiting" && s.NextCycleAt.HasValue)
+            {
+                var wait = Math.Max(0, (s.NextCycleAt.Value - now).TotalSeconds);
+                text += " 완료 · 다음 주기 " + s.NextCycleAt.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture) + " (" + Duration(wait) + " 뒤)";
+            }
+            else if (s.Phase == "cycle")
+            {
+                text += " 실행 중";
+            }
+
+            if (s.LastCycleAt.HasValue)
+            {
+                text += " · 마지막 주기 " + s.LastCycleAt.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            }
+
+            text += " · 누적 삽입 " + N(s.Inserted) + " · 갱신 " + N(s.Updated) + (s.Rejected > 0 ? " · 거부 " + N(s.Rejected) : "");
+            if (s.ConsecutiveFailures > 0)
+            {
+                text += " · 일시 오류 " + s.ConsecutiveFailures + "회 연속(재시도 중)";
+            }
+
+            return text;
         }
 
         /// <summary>실행 모드 설명. 전략이 증분 이관이면 실행·Dry Run은 워터마크(지난 실행의 마지막 키) 다음부터 읽는다는 점을 적는다.</summary>
@@ -471,6 +526,11 @@ namespace MigrationStudio.Logic
             if (i.DestructiveLabels != null && i.DestructiveLabels.Count > 0 && !i.DestructiveAccepted)
             {
                 return StartGate.ConfirmDestructive;
+            }
+
+            if (i.IsSync && !i.SyncAccepted)
+            {
+                return StartGate.ConfirmSync;
             }
 
             return StartGate.Proceed;

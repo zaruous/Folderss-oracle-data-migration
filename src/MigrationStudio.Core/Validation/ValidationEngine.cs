@@ -976,8 +976,13 @@ namespace MigrationStudio.Core.Validation
             List<MappingModel> used,
             SchemaMetadata srcMeta)
         {
-            if (ctx.Job == null || ctx.Job.Strategy == null
-                || !string.Equals(ctx.Job.Strategy.Mode, ExecutionModes.Incremental, StringComparison.Ordinal))
+            if (ctx.Job == null || ctx.Job.Strategy == null)
+            {
+                return;
+            }
+
+            var cdc = string.Equals(ctx.Job.Strategy.Mode, ExecutionModes.Cdc, StringComparison.Ordinal);
+            if (!cdc && !string.Equals(ctx.Job.Strategy.Mode, ExecutionModes.Incremental, StringComparison.Ordinal))
             {
                 return;
             }
@@ -1004,8 +1009,11 @@ namespace MigrationStudio.Core.Validation
                 var column = source != null ? source.FindColumn(tm.CheckpointColumn) : null;
                 var type = column != null && !string.IsNullOrEmpty(column.Type) ? OracleType.Parse(column.Type) : null;
                 var ordered = type != null && (type.IsNumber || type.IsDate);
+                // 변경동기화는 같은 행이 수정될 때마다 다시 오므로 INSERT ONLY면 두 번째부터 중복 키 — 1회성 증분보다 한 단계 높여 WARN
+                var insertOnly = string.Equals(tm.Mode, WriteModes.InsertOnly, StringComparison.Ordinal);
                 var level = !ordered ? CheckLevels.Warn
-                    : string.Equals(tm.Mode, WriteModes.InsertOnly, StringComparison.Ordinal) ? CheckLevels.Info
+                    : insertOnly && cdc ? CheckLevels.Warn
+                    : insertOnly ? CheckLevels.Info
                     : CheckLevels.Pass;
                 var detail = tm.CheckpointColumn + (column != null ? " (" + column.Type + ")" : "") + " > 워터마크 행만 읽음";
                 if (!ordered)
@@ -1014,9 +1022,12 @@ namespace MigrationStudio.Core.Validation
                         ? " · 원본에서 열을 찾지 못해 형식을 확인 못 함"
                         : " · 숫자·날짜가 아닌 열은 사전순 비교라 증분 기준으로 어긋날 수 있음";
                 }
-                else if (level == CheckLevels.Info)
+
+                if (insertOnly)
                 {
-                    detail += " · INSERT ONLY는 워터마크 이후 행이 모두 새 행일 때만 안전 — 수정된 행도 다시 오면 INSERT+UPDATE";
+                    detail += cdc
+                        ? " · 변경동기화에서 INSERT ONLY는 수정된 행이 다시 올 때 중복 키(ORA-00001) — INSERT+UPDATE 권장"
+                        : " · INSERT ONLY는 워터마크 이후 행이 모두 새 행일 때만 안전 — 수정된 행도 다시 오면 INSERT+UPDATE";
                 }
 
                 Emit(items, onItem, Item("매핑", "증분 기준", LabelOf(tm), level, detail,

@@ -38,6 +38,20 @@ namespace MigrationStudio.Core.Engine
         private int _pausedWorkers;
         private string _state = "idle";
         private bool _ended;
+        // SYNC(변경동기화) 주기 상태
+        private int _cycle;
+        private string _syncPhase;
+        private DateTime? _lastCycleAt;
+        private DateTime? _nextCycleAt;
+        private long _syncWritten;
+        private long _syncInserted;
+        private long _syncUpdated;
+        private long _syncRejected;
+        private int _consecutiveFailures;
+        private const int MaxConsecutiveFailures = 5;
+
+        /// <summary>주기 사이 대기. 시험에서는 가짜 시계를 움직이는 함수로 바꿔 끼운다.</summary>
+        public Func<TimeSpan, CancellationToken, Task> CycleDelay { get; set; } = (span, token) => Task.Delay(span, token);
 
         public MigrationEngine(RunSpec spec, ISourceFactory source, ITargetFactory target,
             ICheckpointStore store, IRunListener listener, IRunClock clock)
@@ -88,7 +102,9 @@ namespace MigrationStudio.Core.Engine
                 {
                     Log("START", "실행 " + _spec.RunId + " · " + ModeText(_spec.RunMode) + " · 작업 " + _spec.Plan.Count + "개\n" +
                         "Batch size=" + Number(CommitSize()) + " · Fetch=" + Number(FetchSize()) + " · Workers=" + Workers() +
-                        " · 오류 정책=" + PolicyText(ErrorPolicy()) + " · 체크포인트=" + StoreText());
+                        " · 오류 정책=" + PolicyText(ErrorPolicy()) + " · 체크포인트=" + StoreText() +
+                        (IsSync() ? "\n주기=" + PollInterval().TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + "초 · 최대 실행=" +
+                            (MaxRunHours() > 0 ? MaxRunHours() + "시간" : "무기한(중지할 때까지)") + " · 창을 닫아도 에이전트가 계속 동기화" : ""));
                     EmitSnapshot(true);
                     var preparation = _target as ITargetPreparation;
                     if (preparation != null && !IsDry())
@@ -103,39 +119,28 @@ namespace MigrationStudio.Core.Engine
                         await _recorder.StartAsync(_spec, _stop.Token).ConfigureAwait(false);
                     }
 
-                    for (var i = 0; i < _spec.Plan.Count; i++)
+                    if (IsSync())
                     {
-                        if (_stop.IsCancellationRequested)
-                        {
-                            break;
-                        }
-
-                        var task = _tasks[i];
-                        await RunItemAsync(task, _stop.Token).ConfigureAwait(false);
-                        if (task.Status == "failed" || task.Status == "stopped")
-                        {
-                            for (var j = i + 1; j < _tasks.Count; j++)
-                            {
-                                _tasks[j].Status = "skipped";
-                            }
-                            break;
-                        }
-                    }
-
-                    if (_stop.IsCancellationRequested)
-                    {
-                        Finish("stopped", null);
-                    }
-                    else if (_tasks.Any(t => t.Status == "failed"))
-                    {
-                        Finish("failed", null);
+                        await RunSyncAsync().ConfigureAwait(false);
                     }
                     else
                     {
-                        var snapshot = Snapshot();
-                        Log("DONE", "전체 " + _tasks.Count + "개 작업 · " + Number(snapshot.Tasks.Sum(t => t.Written)) +
-                            "행 · " + Duration(snapshot.Elapsed) + (IsDry() ? " · Dry Run(대상 변경 없음)" : ""));
-                        Finish("done", null);
+                        await RunPassAsync(_stop.Token).ConfigureAwait(false);
+                        if (_stop.IsCancellationRequested)
+                        {
+                            Finish("stopped", null);
+                        }
+                        else if (_tasks.Any(t => t.Status == "failed"))
+                        {
+                            Finish("failed", null);
+                        }
+                        else
+                        {
+                            var snapshot = Snapshot();
+                            Log("DONE", "전체 " + _tasks.Count + "개 작업 · " + Number(snapshot.Tasks.Sum(t => t.Written)) +
+                                "행 · " + Duration(snapshot.Elapsed) + (IsDry() ? " · Dry Run(대상 변경 없음)" : ""));
+                            Finish("done", null);
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (_stop.IsCancellationRequested || hostCancel.IsCancellationRequested)
@@ -151,6 +156,177 @@ namespace MigrationStudio.Core.Engine
                     }
                     Log("ERROR", SafeError(ex));
                     Finish("failed", SafeError(ex));
+                }
+            }
+        }
+
+        /// <summary>계획한 작업을 순서대로 한 번 돈다. 하나가 실패·중지되면 뒤는 건너뛴다.</summary>
+        private async Task RunPassAsync(CancellationToken cancellationToken)
+        {
+            for (var i = 0; i < _tasks.Count; i++)
+            {
+                if (_stop.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                var task = _tasks[i];
+                await RunItemAsync(task, cancellationToken).ConfigureAwait(false);
+                if (task.Status == "failed" || task.Status == "stopped")
+                {
+                    for (var j = i + 1; j < _tasks.Count; j++)
+                    {
+                        _tasks[j].Status = "skipped";
+                    }
+                    break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// SYNC(변경동기화): [한 번 돌기 → 워터마크 올리기 → 대기]를 중지·최대 실행 시간·연속 오류 상한까지 반복한다.
+        /// 끝은 stopped(사용자) · done(최대 실행 시간) · failed(데이터 오류 또는 일시 오류 연속 상한)뿐이다.
+        /// </summary>
+        private async Task RunSyncAsync()
+        {
+            var interval = PollInterval();
+            var maxHours = MaxRunHours();
+            while (!_stop.IsCancellationRequested)
+            {
+                lock (_gate)
+                {
+                    _cycle++;
+                    _syncPhase = "cycle";
+                    _nextCycleAt = null;
+                    foreach (var task in _tasks)
+                    {
+                        task.ResetForCycle();
+                    }
+                }
+                if (_cycle > 1)
+                {
+                    Log("CYCLE", "주기 " + _cycle + " 시작");
+                }
+
+                await RunPassAsync(_stop.Token).ConfigureAwait(false);
+                if (_stop.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                // 이번 주기에 커밋한 마지막 키가 다음 주기의 워터마크. 커밋이 없었으면(변경 없음·실패) 지난 워터마크 그대로.
+                foreach (var task in _tasks)
+                {
+                    task.Item = NextCycleItem(task.Item, task.Checkpoint ?? task.Item.ResumeFrom);
+                }
+
+                var failed = _tasks.FirstOrDefault(t => t.Status == "failed");
+                if (failed != null)
+                {
+                    var transient = failed.LastError != null && IsTransient(failed.LastError);
+                    int failures;
+                    lock (_gate) { failures = ++_consecutiveFailures; }
+                    if (!transient || failures > MaxConsecutiveFailures)
+                    {
+                        Log("ERROR", transient
+                            ? "일시 오류가 " + MaxConsecutiveFailures + "번 연속 — 동기화를 멈춤 · 워터마크는 마지막 커밋 값 그대로이니 원인을 고친 뒤 다시 시작"
+                            : "데이터·설정 오류는 다시 돌려도 같음 — 동기화를 멈춤");
+                        Finish("failed", null);
+                        return;
+                    }
+
+                    var backoff = TimeSpan.FromTicks(Math.Min(interval.Ticks * (1L << (failures - 1)), TimeSpan.FromMinutes(30).Ticks));
+                    Log("WARN", "일시 오류 · " + Duration(backoff.TotalSeconds) + " 뒤 다시 시도 " + failures + "/" + MaxConsecutiveFailures + " · 워터마크 유지");
+                    await WaitBetweenCyclesAsync(backoff).ConfigureAwait(false);
+                    continue;
+                }
+
+                long cycleWritten, cycleInserted, cycleUpdated, cycleRejected;
+                lock (_gate)
+                {
+                    _consecutiveFailures = 0;
+                    _lastCycleAt = _clock.Now;
+                    cycleWritten = _tasks.Sum(t => t.Written);
+                    cycleInserted = _tasks.Sum(t => t.Inserted);
+                    cycleUpdated = _tasks.Sum(t => t.Updated);
+                    cycleRejected = _tasks.Sum(t => t.Rejected);
+                    _syncWritten += cycleWritten;
+                    _syncInserted += cycleInserted;
+                    _syncUpdated += cycleUpdated;
+                    _syncRejected += cycleRejected;
+                }
+                Log("CYCLE", "주기 " + _cycle + " 완료 · 새 " + Number(cycleWritten) + "행 (삽입 " + Number(cycleInserted) + " · 갱신 " + Number(cycleUpdated) +
+                    (cycleRejected > 0 ? " · 거부 " + Number(cycleRejected) : "") + ") · 누적 " + Number(_syncWritten) + "행");
+
+                if (maxHours > 0 && (_clock.Now - _startedAt).TotalHours >= maxHours)
+                {
+                    Log("DONE", "최대 실행 시간 " + maxHours + "시간 도달 — 동기화 종료 · 주기 " + _cycle + "회 · 누적 " + Number(_syncWritten) + "행" +
+                        " · 다시 시작하면 워터마크 다음부터 이어 감");
+                    Finish("done", null);
+                    return;
+                }
+
+                await WaitBetweenCyclesAsync(interval).ConfigureAwait(false);
+            }
+
+            Finish("stopped", null);
+        }
+
+        /// <summary>다음 주기의 계획: 같은 매핑, 워터마크 다음부터, 범위 하나. 읽을 행 수는 미리 세지 않는다(주기마다 COUNT를 돌리지 않기 위해).</summary>
+        private static PlanItem NextCycleItem(PlanItem item, string watermark)
+        {
+            return new PlanItem
+            {
+                Key = item.Key, Mapping = item.Mapping, Label = item.Label,
+                ScopeTotal = 0, ResumeFrom = watermark, BaseRows = 0,
+                Ranges = new List<KeyRange>(),
+                TargetRowsBefore = item.TargetRowsBefore, ErrorTable = item.ErrorTable, Notes = null,
+                SourceMetadata = item.SourceMetadata, TargetMetadata = item.TargetMetadata, WriteColumns = item.WriteColumns
+            };
+        }
+
+        /// <summary>1초 조각으로 기다리며 중지·일시 정지에 바로 반응한다(긴 주기 동안 일시 정지 요청이 묻히지 않게).</summary>
+        private async Task WaitBetweenCyclesAsync(TimeSpan span)
+        {
+            DateTime until;
+            lock (_gate)
+            {
+                _syncPhase = "waiting";
+                until = _clock.Now + span;
+                _nextCycleAt = until;
+            }
+            EmitSnapshot(true);
+            while (!_stop.IsCancellationRequested)
+            {
+                var remaining = until - _clock.Now;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    break;
+                }
+
+                var slice = remaining < TimeSpan.FromSeconds(1) ? remaining : TimeSpan.FromSeconds(1);
+                await CycleDelay(slice, _stop.Token).ConfigureAwait(false);
+                PauseBetweenCycles();
+            }
+        }
+
+        private void PauseBetweenCycles()
+        {
+            lock (_gate)
+            {
+                if (!_pauseRequested)
+                {
+                    return;
+                }
+                _state = "paused";
+            }
+            Log("PAUSE", "주기 사이에서 일시 정지");
+            EmitSnapshot(true);
+            lock (_gate)
+            {
+                while (_pauseRequested && !_stop.IsCancellationRequested)
+                {
+                    Monitor.Wait(_gate, 100);
                 }
             }
         }
@@ -236,10 +412,28 @@ namespace MigrationStudio.Core.Engine
                     snapshot.Tasks.Add(task.Copy(_clock.Now));
                 }
 
-                snapshot.Totals.Total = _spec.Plan.Sum(p => p.ScopeTotal);
+                snapshot.Totals.Total = _tasks.Sum(t => t.Item.ScopeTotal);
                 snapshot.Totals.Done = _tasks.Sum(t => t.Item.BaseRows + t.Written);
                 snapshot.Totals.Pct = snapshot.Totals.Total == 0 ? 100 : snapshot.Totals.Done * 100.0 / snapshot.Totals.Total;
                 snapshot.Totals.EtaSeconds = _rate > 0 ? Math.Max(0, snapshot.Totals.Total - snapshot.Totals.Done) / _rate : (double?)null;
+                if (IsSync())
+                {
+                    var inCycle = _syncPhase == "cycle";
+                    snapshot.Sync = new SyncSnapshot
+                    {
+                        Cycle = _cycle,
+                        Phase = _syncPhase,
+                        LastCycleAt = _lastCycleAt,
+                        NextCycleAt = _nextCycleAt,
+                        IntervalSeconds = (int)PollInterval().TotalSeconds,
+                        MaxRunHours = MaxRunHours(),
+                        Written = _syncWritten + (inCycle ? _tasks.Sum(t => t.Written) : 0),
+                        Inserted = _syncInserted + (inCycle ? _tasks.Sum(t => t.Inserted) : 0),
+                        Updated = _syncUpdated + (inCycle ? _tasks.Sum(t => t.Updated) : 0),
+                        Rejected = _syncRejected + (inCycle ? _tasks.Sum(t => t.Rejected) : 0),
+                        ConsecutiveFailures = _consecutiveFailures
+                    };
+                }
                 return snapshot;
             }
         }
@@ -259,8 +453,8 @@ namespace MigrationStudio.Core.Engine
             }
             else if (task.Item.ResumeFrom != null)
             {
-                startLines.Add("증분: " + task.Item.Mapping.CheckpointColumn + " > " + task.Item.ResumeFrom +
-                    " (워터마크) · 새 " + Number(task.Item.ScopeTotal) + "행");
+                startLines.Add("증분: " + task.Item.Mapping.CheckpointColumn + " > " + task.Item.ResumeFrom + " (워터마크)" +
+                    (task.Item.ScopeTotal > 0 ? " · 새 " + Number(task.Item.ScopeTotal) + "행" : ""));
             }
             else if (!string.IsNullOrEmpty(task.Item.Mapping.CheckpointColumn))
             {
@@ -283,8 +477,9 @@ namespace MigrationStudio.Core.Engine
             {
                 Log("INFO", "MERGE enabled · 대상 기존 " + Number(task.Item.TargetRowsBefore) + "행은 갱신 예상");
             }
-            if (!IsDry())
+            if (!IsDry() && _cycle <= 1)
             {
+                // MIG_RUN_TASK는 (RUN_ID, TASK_KEY)가 키라 동기화에서는 첫 주기에만 넣고, 끝날 때마다 갱신만 한다.
                 await _recorder.TaskStartedAsync(_spec, task.Item, cancellationToken).ConfigureAwait(false);
             }
 
@@ -361,6 +556,7 @@ namespace MigrationStudio.Core.Engine
                 catch (Exception ex)
                 {
                     task.Status = "failed";
+                    task.LastError = ex;
                     Log("ERROR", SafeError(ex) + (task.Checkpoint == null ? "" : "\n체크포인트: " + task.Item.Mapping.CheckpointColumn + " = " + task.Checkpoint + " (재개하면 여기부터)"));
                     if (!IsDry())
                     {
@@ -803,7 +999,7 @@ namespace MigrationStudio.Core.Engine
                 }
                 var rows = _tasks.Sum(t => t.Written);
                 var seconds = Math.Max(0.001, (now - _lastRateAt).TotalSeconds);
-                var instant = (rows - _lastRateRows) / seconds;
+                var instant = Math.Max(0, rows - _lastRateRows) / seconds;
                 _rate = _rate == 0 ? instant : _rate * 0.7 + instant * 0.3;
                 _lastRateRows = rows;
                 _lastRateAt = now;
@@ -1039,10 +1235,13 @@ namespace MigrationStudio.Core.Engine
         private int Workers() { return Math.Max(1, _spec.Job.Strategy.Workers); }
         private string ErrorPolicy() { return _spec.Job.Strategy.ErrorPolicy; }
         private bool IsDry() { return string.Equals(_spec.RunMode, "DRY", StringComparison.Ordinal); }
+        private bool IsSync() { return string.Equals(_spec.RunMode, RunModes.Sync, StringComparison.Ordinal); }
+        private TimeSpan PollInterval() { return TimeSpan.FromSeconds(Math.Max(1, _spec.Job.Strategy.PollIntervalSeconds)); }
+        private int MaxRunHours() { return Math.Max(0, _spec.Job.Strategy.MaxRunHours); }
         private string StoreText() { return string.Equals(_spec.CheckpointStore, "LOCAL", StringComparison.Ordinal) ? "로컬 파일" : "대상 DB(" + _spec.ControlPrefix + "CHECKPOINT)"; }
         private static string Number(long n) { return n.ToString("N0", CultureInfo.GetCultureInfo("en-US")); }
         private static string Duration(double seconds) { return TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture); }
-        private static string ModeText(string mode) { return mode == "DRY" ? "Dry Run(쓰기 없음)" : mode == "RESUME" ? "체크포인트에서 재개" : "이관 실행"; }
+        private static string ModeText(string mode) { return mode == "DRY" ? "Dry Run(쓰기 없음)" : mode == "RESUME" ? "체크포인트에서 재개" : mode == RunModes.Sync ? "CDC(변경동기화) · 주기 반복" : "이관 실행"; }
         private static string ModeLabel(string mode) { return mode == WriteModes.Merge ? "INSERT+UPDATE" : mode; }
         private static string PolicyText(string policy) { return policy == ErrorPolicies.Continue ? "계속 + 오류 테이블" : policy == ErrorPolicies.Retry ? "3회 재시도" : "오류 시 중지"; }
         private static long NiceStep(long total)
@@ -1070,7 +1269,18 @@ namespace MigrationStudio.Core.Engine
             public int Buffered;
             public int WritingWorkers;
             public long LastLogged;
+            public Exception LastError;
             public List<RangeState> Ranges = new List<RangeState>();
+
+            /// <summary>다음 주기를 위해 이번 주기 수치를 비운다. Item(워터마크)은 호출자가 바꾼다.</summary>
+            public void ResetForCycle()
+            {
+                Status = "wait";
+                Read = 0; Written = 0; Inserted = 0; Updated = 0; Rejected = 0; Commits = 0;
+                Checkpoint = null; Buffered = 0; WritingWorkers = 0; LastLogged = 0; LastError = null;
+                StartedAt = default(DateTime); EndedAt = default(DateTime);
+                Ranges = new List<RangeState>();
+            }
 
             public TaskSnapshot Copy(DateTime now)
             {

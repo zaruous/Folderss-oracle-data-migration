@@ -20,7 +20,7 @@ namespace MigrationStudio.Tests.Engine
     /// </summary>
     public sealed class IncrementalRunTests
     {
-        private static readonly DateTime Base = new DateTime(2026, 10, 1, 9, 0, 0);
+        internal static readonly DateTime Base = new DateTime(2026, 10, 1, 9, 0, 0);
 
         [Fact]
         public async Task Incremental_reads_only_rows_after_watermark_and_advances_it()
@@ -144,17 +144,17 @@ namespace MigrationStudio.Tests.Engine
             Assert.Equal("100", RunPlanner.Watermark(records, "M1"));
         }
 
-        private static object[] Row(int i)
+        internal static object[] Row(int i)
         {
             return new object[] { (decimal)i, "NAME-" + i, Base.AddMinutes(i) };
         }
 
-        private static string Stamp(int minutes)
+        internal static string Stamp(int minutes)
         {
             return Base.AddMinutes(minutes).ToString("yyyy-MM-dd HH:mm:ss.ffffff", CultureInfo.InvariantCulture);
         }
 
-        private sealed class RunResult
+        internal sealed class RunResult
         {
             internal MigrationEngine Engine;
             internal CaptureListener Listener;
@@ -162,7 +162,7 @@ namespace MigrationStudio.Tests.Engine
         }
 
         /// <summary>원본·대상·체크포인트 저장소를 들고 있다가 실행마다 플래너 → 엔진을 새로 만든다(실제 호스트가 하는 순서).</summary>
-        private sealed class World
+        internal sealed class World
         {
             private readonly string _writeMode;
             private readonly string _storeMode;
@@ -179,6 +179,9 @@ namespace MigrationStudio.Tests.Engine
             internal MemoryTable Source { get; private set; }
             internal MemoryTable Target { get; private set; }
             internal MemoryCheckpointStore Store { get; private set; } = new MemoryCheckpointStore();
+            internal ManualClock Clock { get; private set; }
+            internal MemoryTargetFactory TargetFactory { get; private set; }
+            internal MigrationStrategy LastStrategy { get; private set; }
 
             internal void Touch(int id, int minutes)
             {
@@ -192,7 +195,14 @@ namespace MigrationStudio.Tests.Engine
                 return (string)Target.Rows.First(r => (decimal)r[0] == (decimal)id)[1];
             }
 
-            internal async Task<RunResult> RunAsync(string strategyMode, string runMode)
+            internal Task<RunResult> RunAsync(string strategyMode, string runMode)
+            {
+                return RunAsync(strategyMode, runMode, null, null);
+            }
+
+            /// <param name="strategy">전략을 손볼 때(주기·최대 실행 시간).</param>
+            /// <param name="configure">엔진을 돌리기 전에 손볼 때(주기 대기 바꿔 끼우기 등).</param>
+            internal async Task<RunResult> RunAsync(string strategyMode, string runMode, Action<MigrationStrategy> strategy, Action<MigrationEngine> configure)
             {
                 var mapping = new Mapping
                 {
@@ -211,6 +221,8 @@ namespace MigrationStudio.Tests.Engine
                     Strategy = new MigrationStrategy { Mode = strategyMode, CommitSize = 4, FetchSize = 4, Workers = 1, ErrorPolicy = ErrorPolicies.Continue },
                     Mappings = new List<Mapping> { mapping }
                 };
+                if (strategy != null) strategy(job.Strategy);
+                LastStrategy = job.Strategy;
                 var metadata = new RunMetadata
                 {
                     Source = new SchemaMetadata { Tables = new List<TableMetadata> { Meta(Source) } },
@@ -224,8 +236,10 @@ namespace MigrationStudio.Tests.Engine
                     CheckpointStore = _storeMode, Plan = plan, RetryDelays = new List<int> { 0, 0, 0 }
                 };
                 var listener = new CaptureListener();
-                var engine = new MigrationEngine(spec, new MemorySourceFactory(Source), new MemoryTargetFactory(Target) { Checkpoints = Store },
-                    Store, listener, new ManualClock(new DateTime(2026, 10, 9, 10, 0, 0)));
+                Clock = new ManualClock(new DateTime(2026, 10, 9, 10, 0, 0));
+                TargetFactory = new MemoryTargetFactory(Target) { Checkpoints = Store };
+                var engine = new MigrationEngine(spec, new MemorySourceFactory(Source), TargetFactory, Store, listener, Clock);
+                if (configure != null) configure(engine);
                 await engine.RunAsync(CancellationToken.None);
                 return new RunResult { Engine = engine, Listener = listener, Plan = plan };
             }

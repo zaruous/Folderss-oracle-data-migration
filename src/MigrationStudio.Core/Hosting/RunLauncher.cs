@@ -150,9 +150,22 @@ namespace MigrationStudio.Core.Hosting
             return new LaunchFailedException(LaunchStage.Plan, ex.Message, ex);
         }
 
+        /// <summary>전략이 CDC(변경동기화)면 실행·재개는 SYNC(주기 반복)로 돈다. Dry Run은 워터마크 이후 한 번만 읽는다.</summary>
+        public static string ResolveRunMode(MigrationJob job, string runMode)
+        {
+            var cdc = job != null && job.Strategy != null && string.Equals(job.Strategy.Mode, ExecutionModes.Cdc, StringComparison.Ordinal);
+            if (cdc && (string.Equals(runMode, RunModes.Execute, StringComparison.Ordinal) || string.Equals(runMode, RunModes.Resume, StringComparison.Ordinal)))
+            {
+                return RunModes.Sync;
+            }
+
+            return runMode;
+        }
+
         private async Task<RunSpec> BuildRunSpecAsync(MigrationJob job, SchemaMetadata sourceMeta, SchemaMetadata targetMeta,
             ISet<string> selectedIds, string runMode, PasswordResolver passwords, string dataDirectory, AgentSettings agentSettings, CancellationToken ct)
         {
+            runMode = ResolveRunMode(job, runMode);
             var sourceProfile = FindProfile(job.Source != null ? job.Source.ProfileId : null);
             var targetProfile = FindProfile(job.Target != null ? job.Target.ProfileId : null);
             if (sourceProfile == null || targetProfile == null)

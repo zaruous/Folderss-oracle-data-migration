@@ -63,6 +63,27 @@ namespace MigrationStudio.Tests
         }
 
         [Fact]
+        public void JobFile_sync_fields_roundtrip_and_defaults_are_omitted()
+        {
+            var settings = GoldenTestHelpers.SettingsFromGolden();
+            var job = GoldenTestHelpers.SampleJob();
+            var json = JobFile.Serialize(job, settings);
+            Assert.DoesNotContain("pollIntervalSeconds", json);
+            Assert.DoesNotContain("maxRunHours", json);
+            var parsedDefault = JobFile.Parse(json);
+            Assert.Equal(60, parsedDefault.Strategy.PollIntervalSeconds);
+            Assert.Equal(24, parsedDefault.Strategy.MaxRunHours);
+
+            job.Strategy.Mode = ExecutionModes.Cdc;
+            job.Strategy.PollIntervalSeconds = 300;
+            job.Strategy.MaxRunHours = 0;
+            var parsed = JobFile.Parse(JobFile.Serialize(job, settings));
+            Assert.Equal(ExecutionModes.Cdc, parsed.Strategy.Mode);
+            Assert.Equal(300, parsed.Strategy.PollIntervalSeconds);
+            Assert.Equal(0, parsed.Strategy.MaxRunHours);
+        }
+
+        [Fact]
         public void JobFile_roundtrip_serialize_parse_preserves_job()
         {
             var settings = GoldenTestHelpers.SettingsFromGolden();

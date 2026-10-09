@@ -59,6 +59,9 @@ namespace MigrationStudio.Core.Hosting
                 info.JobName = GetString(root, "jobName");
                 info.Message = GetString(root, "message");
                 info.StartedAt = ParseDate(GetString(root, "startedAt"));
+                info.Cycle = GetInt(root, "cycle");
+                var lastCycle = ParseDate(GetString(root, "lastCycleAt"));
+                info.LastCycleAt = lastCycle == DateTime.MinValue ? (DateTime?)null : lastCycle;
                 return info;
             }
         }
@@ -94,7 +97,9 @@ namespace MigrationStudio.Core.Hosting
                 agentVersion = info.AgentVersion,
                 state = info.State,
                 jobName = info.JobName,
-                message = info.Message
+                message = info.Message,
+                cycle = info.Cycle,
+                lastCycleAt = info.LastCycleAt.HasValue ? info.LastCycleAt.Value.ToString("o", CultureInfo.InvariantCulture) : null
             };
             return JsonSerializer.Serialize(obj, AgentProtocol.JsonOptions);
         }

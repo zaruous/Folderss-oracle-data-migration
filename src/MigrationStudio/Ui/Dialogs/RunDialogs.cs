@@ -128,6 +128,59 @@ namespace MigrationStudio.Ui.Modals
             return ok;
         }
 
+        /// <summary>CDC(변경동기화) 시작 확인. 창을 닫아도 도는 실행이라 "언제까지 · 얼마나 자주 · 어디에 쓰는지"를 한 번 더 보여 준다.</summary>
+        public static bool ConfirmSync(Window owner, ConnectionProfile target, MigrationStrategy strategy, AgentSettings agent)
+        {
+            strategy = strategy ?? new MigrationStrategy();
+            agent = agent ?? new AgentSettings();
+            var window = DialogKit.Create(owner, "CDC(변경동기화) 시작", 500);
+            var body = DialogKit.Body(window);
+            var production = target != null && target.Color == "red";
+            body.Children.Add(DialogKit.Target(target, "대상" + (production ? " 운영 DB" : "") + "에 주기마다 변경을 반영합니다."));
+            var lines = new List<string>
+            {
+                "주기: " + strategy.PollIntervalSeconds + "초마다 워터마크 다음 행을 읽어 INSERT+UPDATE",
+                "종료: " + (strategy.MaxRunHours > 0 ? "최대 " + strategy.MaxRunHours + "시간 뒤 자동 종료 (또는 중지 버튼)" : "무기한 — 중지 버튼을 누를 때까지"),
+                "창을 닫으면: " + (string.Equals(agent.OnHostExit, "STOP", System.StringComparison.OrdinalIgnoreCase)
+                    ? "Folderss를 닫을 때 함께 중지 (설정 > 에이전트)"
+                    : "Folderss를 닫아도 에이전트가 계속 동기화 (설정 > 에이전트에서 바꿀 수 있음)"),
+                "절전·재부팅·로그아웃이면 멈추고 스스로 다시 시작하지 않음 — 다시 열면 워터마크 다음부터 이어 감",
+                "동기화가 도는 동안 같은 작업의 다른 실행은 할 수 없음"
+            };
+            var list = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            foreach (var line in lines)
+            {
+                var t = Theme.Text("• " + line);
+                t.TextWrapping = TextWrapping.Wrap;
+                t.FontSize = 12;
+                t.Margin = new Thickness(0, 0, 0, 4);
+                list.Children.Add(t);
+            }
+
+            body.Children.Add(list);
+            if (strategy.MaxRunHours <= 0 || production)
+            {
+                var warn = new TextBlock
+                {
+                    Text = (production ? "운영 DB에 상시로 씁니다. " : "") + (strategy.MaxRunHours <= 0 ? "종료 시간이 없어 잊으면 계속 돕니다." : ""),
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Foreground = Theme.Warning
+                };
+                body.Children.Add(warn);
+            }
+
+            var check = DialogKit.Check("위 내용을 확인했습니다");
+            body.Children.Add(check);
+            var ok = false;
+            var run = DialogKit.PrimaryButton("동기화 시작");
+            run.IsEnabled = false;
+            check.Checked += (s, e) => run.IsEnabled = true;
+            check.Unchecked += (s, e) => run.IsEnabled = false;
+            run.Click += (s, e) => { ok = true; window.DialogResult = true; };
+            body.Children.Add(DialogKit.Buttons(DialogKit.CancelButton("취소", true), run));
+            Show(window);
+            return ok;
+        }
+
         private static bool Show(Window window)
         {
             if (AppServices.DevHostCaptureMode)

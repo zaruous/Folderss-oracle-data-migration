@@ -10,6 +10,7 @@ using System.Windows.Media;
 using MigrationStudio.Core.Engine;
 using MigrationStudio.Core.Hosting;
 using MigrationStudio.Core.Model;
+using MigrationStudio.Core.Settings;
 using MigrationStudio.Core.Validation;
 using MigrationStudio.Logic;
 using MigrationStudio.Services;
@@ -31,6 +32,7 @@ namespace MigrationStudio.Ui.Pages
 
         // 갱신할 칸들(Rebuild에서 만든다)
         private TextBlock _rowsText, _ofText, _pctText, _currentText, _runIdText;
+        private TextBlock _syncText;
         private Border _statePill;
         private ProgressBarView _bar;
         private readonly Dictionary<string, TextBlock> _stats = new Dictionary<string, TextBlock>();
@@ -520,7 +522,7 @@ namespace MigrationStudio.Ui.Pages
             var modeField = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             modeField.Children.Add(Kit.SectionLabel("실행 모드 (Run Mode)"));
             modeField.Children.Add(modeSeg);
-            var desc = Theme.Secondary(RunLogic.ModeDescription(mode, string.Equals(st.Mode, ExecutionModes.Incremental, StringComparison.Ordinal)));
+            var desc = Theme.Secondary(RunLogic.ModeDescription(mode, st.Mode));
             desc.TextWrapping = TextWrapping.Wrap;
             desc.FontSize = 11.5;
             desc.Margin = new Thickness(0, 6, 0, 0);
@@ -660,6 +662,11 @@ namespace MigrationStudio.Ui.Pages
             _currentText.FontSize = 12;
             _currentText.Margin = new Thickness(0, 0, 0, 8);
             body.Children.Add(_currentText);
+            _syncText = Theme.Secondary("");
+            _syncText.FontSize = 12;
+            _syncText.Margin = new Thickness(0, 0, 0, 8);
+            _syncText.Visibility = Visibility.Collapsed;
+            body.Children.Add(_syncText);
             _bar = new ProgressBarView(8);
             _bar.Root.Margin = new Thickness(0, 0, 0, 12);
             body.Children.Add(_bar.Root);
@@ -804,6 +811,9 @@ namespace MigrationStudio.Ui.Pages
                 ? "지금: " + current.Label + " (" + (snap.Tasks.IndexOf(current) + 1) + "/" + snap.Tasks.Count + ")"
                 : snap == null ? SelectedSummary() : "";
             _bar.Set(pct, state == RunStates.Paused || state == RunStates.Pausing ? "paused" : state == RunStates.Done ? "done" : state == RunStates.Stopped || state == RunStates.Failed ? "stopped" : "");
+            var syncLine = RunLogic.SyncSummary(snap, DateTime.Now);
+            _syncText.Text = syncLine ?? "";
+            _syncText.Visibility = syncLine == null ? Visibility.Collapsed : Visibility.Visible;
 
             _stats["rate"].Text = snap != null && state == RunStates.Running ? RunLogic.Rate(snap.Rate) + " 행/초" : "—";
             _stats["elapsed"].Text = snap != null ? RunLogic.Duration(snap.Elapsed) : "—";
@@ -1197,6 +1207,8 @@ namespace MigrationStudio.Ui.Pages
             var destructive = sel.Where(m => RunLogic.IsDestructive(m.Mode))
                 .Select(m => WriteModes.Of(m.Mode).Label + "  " + schema + "." + m.Target).ToList();
             inputs.DestructiveLabels = destructive;
+            var strategy = State.Job.Strategy ?? new MigrationStrategy();
+            inputs.IsSync = mode != "DRY" && string.Equals(strategy.Mode, ExecutionModes.Cdc, StringComparison.Ordinal);
 
             for (var guard = 0; guard < 8; guard++)
             {
@@ -1250,6 +1262,15 @@ namespace MigrationStudio.Ui.Pages
                         }
 
                         inputs.DestructiveAccepted = true;
+                        continue;
+                    case StartGate.ConfirmSync:
+                        var agent = State.Settings != null && State.Settings.Agent != null ? State.Settings.Agent : new AgentSettings();
+                        if (!RunDialogs.ConfirmSync(_host.Owner, target, strategy, agent))
+                        {
+                            return;
+                        }
+
+                        inputs.SyncAccepted = true;
                         continue;
                     default:
                         Launch(mode, selection);

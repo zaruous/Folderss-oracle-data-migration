@@ -276,6 +276,14 @@ namespace MigrationStudio.Ui.Pages
                 Kit.Field("트랜잭션 단위", CommitCombo(s), false, null),
                 Kit.Field("Fetch 크기", FetchCombo(s), false, null),
                 Kit.Field("병렬 작업자", WorkersSegment(s), false, "체크포인트 키 범위를 나눠 작업자마다 따로 읽고 씁니다(세션 " + s.Workers.ToString(CultureInfo.InvariantCulture) + "개)")));
+            if (s.Mode == ExecutionModes.Cdc)
+            {
+                _strategyHost.Children.Add(Kit.FormGrid(2,
+                    Kit.Field("동기화 주기", PollCombo(s), false, "주기마다 워터마크 다음 행을 읽어 반영합니다. 동기화 중 병렬 작업자는 1로 돕니다."),
+                    Kit.Field("최대 실행 시간", MaxRunCombo(s), false, s.MaxRunHours > 0
+                        ? "지나면 자동 종료합니다. 다시 시작하면 워터마크 다음부터 이어 갑니다."
+                        : "무기한: 중지 버튼을 누를 때까지 돕니다. 잊으면 계속 쓰므로 종료 시간을 두는 편이 안전합니다.")));
+            }
             var prefixBox = new TextBox { Width = 92, FontFamily = Theme.Mono, Text = s.ErrorTable ?? "" };
             prefixBox.TextChanged += (a, b) => { s.ErrorTable = prefixBox.Text; _state.MarkChanged(); };
             var errItems = new List<Kit.RadioCardItem>
@@ -296,10 +304,67 @@ namespace MigrationStudio.Ui.Pages
 
             if (mode == ExecutionModes.Cdc)
             {
-                return "LogMiner·GoldenGate 연동은 다음 단계 범위입니다.";
+                return "수정시각·증가 키(체크포인트 열) 기준으로 주기마다 추가·변경을 반영합니다. 삭제는 따라가지 않습니다(옵션은 다음 단계).";
             }
 
             return "전체 테이블/쿼리를 처음부터 이관합니다.";
+        }
+
+        private ComboBox PollCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 30, 60, 300, 900, 3600 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add(n < 60 ? n + "초" : n / 60 + "분");
+            }
+
+            var idx = Array.IndexOf(choices, s.PollIntervalSeconds);
+            if (idx < 0)
+            {
+                box.Items.Add(s.PollIntervalSeconds + "초");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.PollIntervalSeconds = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                }
+            };
+            return box;
+        }
+
+        private ComboBox MaxRunCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 1, 8, 24, 72, 0 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add(n == 0 ? "무기한(중지할 때까지)" : n + "시간");
+            }
+
+            var idx = Array.IndexOf(choices, s.MaxRunHours);
+            if (idx < 0)
+            {
+                box.Items.Add(s.MaxRunHours + "시간");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.MaxRunHours = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                    RebuildStrategy();
+                }
+            };
+            return box;
         }
 
         private ComboBox CommitCombo(MigrationStrategy s)
