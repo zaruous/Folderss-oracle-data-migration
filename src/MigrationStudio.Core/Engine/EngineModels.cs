@@ -165,6 +165,39 @@ namespace MigrationStudio.Core.Engine
         public double Elapsed { get; set; }
         public double RateNow { get; set; }
         public List<RangeSnapshot> Ranges { get; set; } = new List<RangeSnapshot>();
+        /// <summary>마지막 삭제 대조 결과(증분·CDC에서만). 없으면 null.</summary>
+        public ReconcileSnapshot Reconcile { get; set; }
+    }
+
+    /// <summary>
+    /// 삭제 대조 한 번의 결과. NONE이면 행 수만(원본 범위 · 대상 전체), MARK면 키 비교 결과와 표시한 수.
+    /// 화면은 이것으로 "원본에 없는 대상 행"을 숨기지 않고 보여 준다.
+    /// </summary>
+    public sealed class ReconcileSnapshot
+    {
+        public DateTime At { get; set; }
+        /// <summary><see cref="Model.DeleteModes"/> 값.</summary>
+        public string Mode { get; set; }
+        public long SourceRows { get; set; }
+        /// <summary>대상 행 수. MARK면 표시 안 된(살아 있는) 행만.</summary>
+        public long TargetRows { get; set; }
+        /// <summary>원본에 없는 대상 행(아직 표시 안 됨).</summary>
+        public long MarkCandidates { get; set; }
+        /// <summary>원본에 다시 있는데 표시된 행.</summary>
+        public long UnmarkCandidates { get; set; }
+        public long AlreadyMarked { get; set; }
+        public long SourceOnly { get; set; }
+        /// <summary>이번 대조에서 실제로 표시·표시 해제한 행.</summary>
+        public long Marked { get; set; }
+        public long Unmarked { get; set; }
+        /// <summary>이 실행에서 표시한 행 누적.</summary>
+        public long TotalMarked { get; set; }
+        public bool Approved { get; set; }
+        /// <summary>표시하지 않은 이유(승인 전 제외): 상한 초과·원본 0행 등. 없으면 null.</summary>
+        public string Blocked { get; set; }
+        public string Error { get; set; }
+        /// <summary>표시 후보 키 표본(최대 5개, 여러 열이면 ", "로 이음).</summary>
+        public List<string> Samples { get; set; } = new List<string>();
     }
 
     public sealed class RangeSnapshot

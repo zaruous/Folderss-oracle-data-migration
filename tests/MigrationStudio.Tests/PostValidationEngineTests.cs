@@ -81,6 +81,55 @@ namespace MigrationStudio.Tests
             Assert.Equal(CheckLevels.Error, p01.Level);
         }
 
+        [Theory]
+        [InlineData(100, 100, "PASS", "MATCH")]
+        [InlineData(100, 103, "WARN", "원본에 없는 대상 행 3")]
+        [InlineData(100, 98, "WARN", "2행 적음")]
+        public async Task RunPost_incremental_compares_whole_target_with_source_scope(long source, long target, string level, string text)
+        {
+            var ctx = SampleContext();
+            ctx.Job.Strategy.Mode = ExecutionModes.Incremental;
+            var adapter = new FakeAdapter(ctx.SourceMeta);
+            adapter.QueryResponder = sql => Count(sql.Contains("TGT_SCHEMA.TGT") ? target : source);
+            // 증분 실행이 이번에 쓴 행(5)은 원본 전체(100)와 비교하지 않는다 — 전에는 이 차이로 항상 ERROR였다
+            var request = new PostValidationRequest
+            {
+                RunId = "R-INC",
+                Final = new RunSnapshot { Tasks = new List<TaskSnapshot> { new TaskSnapshot { Key = "M1", Label = "SRC → TGT", Status = "stopped", Total = 5, Written = 5 } } }
+            };
+            var items = await new PostValidationEngine(adapter, ctx).RunPostAsync(request, null, CancellationToken.None);
+
+            var p01 = items.Single(i => i.Check == "행 수");
+            Assert.Equal(level, p01.Level);
+            Assert.Contains(text, p01.Detail);
+            Assert.Contains(items, i => i.Check == "키·데이터 비교" && i.Level == CheckLevels.Skip);
+            Assert.DoesNotContain(items, i => i.Check == "PK 누락");
+        }
+
+        [Fact]
+        public async Task RunPost_incremental_mark_mapping_counts_only_unmarked_target_rows()
+        {
+            var ctx = SampleContext();
+            ctx.Job.Strategy.Mode = ExecutionModes.Cdc;
+            ctx.Plan[0].Mapping.DeleteMode = DeleteModes.Mark;
+            ctx.Plan[0].Mapping.MarkColumn = "NAME";
+            var adapter = new FakeAdapter(ctx.SourceMeta);
+            string targetSql = null;
+            adapter.QueryResponder = sql =>
+            {
+                if (sql.Contains("TGT_SCHEMA.TGT")) targetSql = sql;
+                return Count(100);
+            };
+            var request = DoneRequest(5, 5, 0);
+            await new PostValidationEngine(adapter, ctx).RunPostAsync(request, null, CancellationToken.None);
+            Assert.EndsWith("WHERE NAME IS NULL", targetSql);
+        }
+
+        private static QueryResult Count(long n)
+        {
+            return new QueryResult { Columns = new List<QueryColumn> { new QueryColumn { Name = "CNT" } }, Rows = new List<string[]> { new[] { n.ToString(System.Globalization.CultureInfo.InvariantCulture) } } };
+        }
+
         private static PostValidationRequest DoneRequest(long total, long written, long rejected)
         {
             return new PostValidationRequest

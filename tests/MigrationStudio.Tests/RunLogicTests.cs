@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using MigrationStudio.Core.Engine;
 using MigrationStudio.Core.Model;
 using MigrationStudio.Core.Validation;
@@ -60,6 +61,58 @@ namespace MigrationStudio.Tests
             Assert.Contains("다음 주기 10:01:00 (00:00:30 뒤)", text);
             Assert.Contains("누적 삽입 1,200 · 갱신 34", text);
             Assert.Contains("일시 오류 1회 연속", text);
+        }
+
+        [Fact]
+        public void Reconcile_lines_show_extra_target_rows_pending_applied_and_blocked()
+        {
+            var at = new System.DateTime(2026, 10, 9, 10, 30, 0);
+            var snap = new RunSnapshot
+            {
+                Tasks = new List<TaskSnapshot>
+                {
+                    new TaskSnapshot { Key = "A", Label = "A → TA", Reconcile = new ReconcileSnapshot { At = at, Mode = DeleteModes.None, SourceRows = 1000, TargetRows = 1012 } },
+                    new TaskSnapshot { Key = "B", Label = "B → TB", Reconcile = new ReconcileSnapshot { At = at, Mode = DeleteModes.Mark, MarkCandidates = 3, Samples = new List<string> { "7", "9" } } },
+                    new TaskSnapshot { Key = "C", Label = "C → TC", Reconcile = new ReconcileSnapshot { At = at, Mode = DeleteModes.Mark, Approved = true, Marked = 2, TotalMarked = 5, AlreadyMarked = 4 } },
+                    new TaskSnapshot { Key = "D", Label = "D → TD", Reconcile = new ReconcileSnapshot { At = at, Mode = DeleteModes.Mark, Approved = true, Blocked = "상한 초과" } },
+                    new TaskSnapshot { Key = "E", Label = "E → TE" }
+                }
+            };
+            var lines = RunLogic.ReconcileLines(snap, false);
+            Assert.Equal(4, lines.Count);
+            Assert.Equal("A → TA: 원본 1,000 · 대상 1,012 · 원본에 없는 대상 12행(삭제 따라가지 않음) · 10:30 대조", lines[0]);
+            Assert.Equal("B → TB: 삭제 표시 대기(승인 전) 3행 (예: 7 / 9) · 10:30 대조", lines[1]);
+            Assert.Equal("C → TC: 삭제 표시 2행 · 이 실행 누적 5 · 이미 표시 6 · 10:30 대조", lines[2]);
+            Assert.Equal("D → TD: 삭제 표시 멈춤 — 상한 초과 · 10:30 대조", lines[3]);
+            Assert.StartsWith("B → TB: 삭제 표시 예정 3행", RunLogic.ReconcileLines(snap, true)[1]);
+            Assert.Equal(new[] { "B" }, RunLogic.ApprovalCandidates(snap).Select(t => t.Key));
+        }
+
+        [Fact]
+        public void Changing_delete_settings_clears_approval_and_mark_candidates_skip_written_columns()
+        {
+            var m = new Mapping
+            {
+                DeleteMode = DeleteModes.Mark, MarkColumn = "DEL_YN", MarkValue = "Y", DeleteApprovedAt = "2026-10-09 10:00:00",
+                Columns = new List<ColumnMapping> { new ColumnMapping { Source = "ID", Target = "ID" }, new ColumnMapping { Source = "NM", Target = "NAME" } }
+            };
+            Assert.False(ColumnsLogic.ChangeDeleteSetting(m, DeleteModes.Mark, "DEL_YN", " Y "));
+            Assert.Equal("2026-10-09 10:00:00", m.DeleteApprovedAt);
+            Assert.True(ColumnsLogic.ChangeDeleteSetting(m, DeleteModes.Mark, "DEL_YN", "N"));
+            Assert.Null(m.DeleteApprovedAt);
+
+            var target = new MigrationStudio.Core.Metadata.TableMetadata
+            {
+                Name = "T",
+                Columns = new List<MigrationStudio.Core.Metadata.ColumnMetadata>
+                {
+                    new MigrationStudio.Core.Metadata.ColumnMetadata { Name = "ID", Type = "NUMBER", Nullable = false },
+                    new MigrationStudio.Core.Metadata.ColumnMetadata { Name = "NAME", Type = "VARCHAR2(20)", Nullable = true },
+                    new MigrationStudio.Core.Metadata.ColumnMetadata { Name = "DEL_YN", Type = "CHAR(1)", Nullable = true },
+                    new MigrationStudio.Core.Metadata.ColumnMetadata { Name = "AUDIT_CD", Type = "CHAR(1)", Nullable = false }
+                }
+            };
+            Assert.Equal(new[] { "DEL_YN" }, ColumnsLogic.MarkColumnCandidates(m, target));
         }
 
         [Fact]

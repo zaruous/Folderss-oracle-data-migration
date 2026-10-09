@@ -267,6 +267,82 @@ namespace MigrationStudio.Logic
             return ModeDescription(mode, string.Equals(strategyMode, ExecutionModes.Incremental, System.StringComparison.Ordinal));
         }
 
+        /// <summary>
+        /// 삭제 대조 결과 줄(작업마다 한 줄). 따라가지 않는 매핑도 원본·대상 행 수 차이를 숨기지 않고 보인다.
+        /// </summary>
+        public static List<string> ReconcileLines(RunSnapshot snap, bool dry)
+        {
+            var lines = new List<string>();
+            if (snap == null || snap.Tasks == null)
+            {
+                return lines;
+            }
+
+            foreach (var task in snap.Tasks)
+            {
+                var r = task.Reconcile;
+                if (r == null)
+                {
+                    continue;
+                }
+
+                var head = task.Label + ": ";
+                var at = " · " + r.At.ToString("HH:mm", CultureInfo.InvariantCulture) + " 대조";
+                if (!string.IsNullOrEmpty(r.Error))
+                {
+                    lines.Add(head + "삭제 대조 실패 — " + r.Error.Split('\n')[0] + at);
+                    continue;
+                }
+
+                if (!DeleteModes.IsMark(r.Mode))
+                {
+                    var diff = r.TargetRows - r.SourceRows;
+                    lines.Add(head + "원본 " + N(r.SourceRows) + " · 대상 " + N(r.TargetRows) +
+                        (diff > 0 ? " · 원본에 없는 대상 " + N(diff) + "행(삭제 따라가지 않음)" : diff < 0 ? " · 대상이 " + N(-diff) + "행 적음" : " · 일치") + at);
+                    continue;
+                }
+
+                var samples = r.Samples != null && r.Samples.Count > 0 ? " (예: " + string.Join(" / ", r.Samples) + ")" : "";
+                if (!string.IsNullOrEmpty(r.Blocked))
+                {
+                    lines.Add(head + "삭제 표시 멈춤 — " + r.Blocked + at);
+                }
+                else if (dry || !r.Approved)
+                {
+                    lines.Add(head + (dry ? "삭제 표시 예정 " : "삭제 표시 대기(승인 전) ") + N(r.MarkCandidates) + "행" +
+                        (r.UnmarkCandidates > 0 ? " · 표시 해제 " + N(r.UnmarkCandidates) + "행" : "") + samples + at);
+                }
+                else
+                {
+                    lines.Add(head + "삭제 표시 " + N(r.Marked) + "행" + (r.Unmarked > 0 ? " · 표시 해제 " + N(r.Unmarked) + "행" : "") +
+                        " · 이 실행 누적 " + N(r.TotalMarked) + " · 이미 표시 " + N(r.AlreadyMarked + r.Marked) + at);
+                }
+            }
+
+            return lines;
+        }
+
+        /// <summary>끝난 실행에서 승인을 받을 수 있는 작업: 삭제 표시 매핑, 승인 전, 대조가 실패·멈추지 않음.</summary>
+        public static List<TaskSnapshot> ApprovalCandidates(RunSnapshot snap)
+        {
+            var list = new List<TaskSnapshot>();
+            if (snap == null || snap.Tasks == null)
+            {
+                return list;
+            }
+
+            foreach (var task in snap.Tasks)
+            {
+                var r = task.Reconcile;
+                if (r != null && DeleteModes.IsMark(r.Mode) && !r.Approved && string.IsNullOrEmpty(r.Error) && string.IsNullOrEmpty(r.Blocked))
+                {
+                    list.Add(task);
+                }
+            }
+
+            return list;
+        }
+
         /// <summary>진행 카드의 동기화 한 줄. SYNC가 아니면 null.</summary>
         public static string SyncSummary(RunSnapshot snap, System.DateTime now)
         {

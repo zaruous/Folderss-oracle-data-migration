@@ -246,7 +246,19 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 - 4.1 전부, `OracleSourceFactory`에 `:UPPER` 바인딩, SQL 원본 WARN. 3.8 접속 능력 감지(`ConnectionTestResult.Capabilities`, 전략 화면 비활성화 + 툴팁).
 - 완료 조건: `SqlGenerator` 골든 외 신규 테스트로 생성 SQL 확인(`> :LOWER AND <= :UPPER`), 커밋 지연 시나리오(가짜 원본에서 "수정시각은 과거·가시화는 다음 주기"인 행이 지연 창 안에서 잡힘), `ValidationEngineTests`에 C14~C17. 능력 감지: 가짜 어댑터가 `ORA-00942`를 내면 결과가 "모름"이고 "불가"가 아님, 권한 있음 + 설정 부족이 따로 표시됨. Oracle IT: `DATE` 경계 같은 초 행 누락 없음, `MIG_IT_RO`(SELECT만) 계정에서 폴링·대조만 열리고 나머지는 모름/닫힘.
 
-### P8-d 삭제 전파 (옵션, 기본 꺼짐)
+### P8-d 삭제 전파 (옵션, 기본 꺼짐) — **①② 구현됨 (2026-10-09), ③ HARD·④ FLASHBACK은 남음**
+- 구현 메모(①②):
+  - 모델: 매핑 단위만(`Mapping.DeleteMode` = `NONE`·`MARK`, `MarkColumn`, `MarkValue`, `DeleteApprovedAt`). 3.1에 적은 "전략 수준 기본값"은 두지 않았다(결정 5 "매핑 단위"로 충분). 전략에는 `ReconcileIntervalMinutes`(60)·`DeleteMaxRatio`(0.1). 모두 기본값이면 작업 파일에 쓰지 않는다. `HARD`·`DeleteBackup`·`DeleteDetect`는 ③에서.
+  - 대조(`Engine/KeyDiff.cs`): 원본·대상 키를 **정규화 문자열의 UTF-8 바이트 해시(ORA_HASH) 순서**로 나란히 읽고, 같은 해시 묶음 안에서는 문자열로 비교한다(충돌 안전). 4.2에 적은 "키 순서 + 집계 해시 범위"는 쓰지 않았다. 두 DB의 NLS 정렬·열 형식이 달라도 같은 순서가 보장되는 쪽을 골랐다. 순서가 깨진 스트림은 표시 전에 예외. **값 해시 비교(놓친 UPDATE 찾기)는 하지 않았다.** 삭제 감지에는 키만 필요하고, 값 정규화(C22)가 가장 손이 가는 부분이라 필요해질 때 따로 한다.
+  - 정규화(`OracleReconcileStore.Normalize`): 대상 열 형식 기준. 숫자는 `TO_CHAR(CAST(x AS NUMBER), 'TM9', 'NLS_NUMERIC_CHARACTERS=''.,''')`, DATE는 `YYYYMMDDHH24MISS`, TIMESTAMP는 `YYYYMMDDHH24MISSFF6`, CHAR·NCHAR는 `RTRIM`, VARCHAR2는 그대로. 시간대 TIMESTAMP·LOB 등은 키로 못 쓴다(검증 ERROR). 해시 입력은 `UTL_I18N.STRING_TO_RAW(K, 'AL32UTF8')`라 두 DB 문자 집합이 달라도 같은 해시가 된다.
+  - 표시: `UPDATE … SET 표시열 = :MV|SYSDATE WHERE ROWID = :RID AND 표시열 IS NULL AND 키문자열 = :K`(해제는 `= NULL … IS NOT NULL`), 1,000행씩 커밋. ROWID만 믿지 않고 키 문자열을 함께 확인해 대조와 표시 사이에 바뀐 행은 건너뛴다. 같은 값을 다시 넣어도 결과가 같아 배치 경계에서 끊겨도 다음 대조가 맞춘다.
+  - 엔진: 1회성 증분(EXECUTE·RESUME·DRY)은 성공한 뒤 MARK 매핑만 대조, SYNC는 대조 주기마다 MARK는 키 대조·NONE은 행 수만 센다(유령 행 표시). SQL 원본은 건너뛴다. 승인 전·Dry Run은 대조만 하고 로그와 스냅숏(`TaskSnapshot.Reconcile`)에 후보 수·표본 5개를 남긴다. 상한 = max(10, ⌈비율 × 살아 있는 대상⌉). 상한 초과·원본 키 0개·후보 20만 행 초과면 표시하지 않고 WARN. 대조 실패도 WARN이고 이관·동기화는 계속한다.
+  - 승인: 실행이 끝난 뒤 결과 알림의 "삭제 표시 승인…" → 건수·표본·경고 + 확인 체크 → `DeleteApprovedAt` 저장(작업 파일). 지금 도는 동기화에는 반영되지 않고 다음 실행부터 표시한다. 삭제 처리·표시 열·표시 값을 바꾸면 승인이 지워진다(`ColumnsLogic.ChangeDeleteSetting`).
+  - 검증 `삭제 반영`(C20 일부·C23 포함): 테이블 원본, 병합 키(지원 형식), 표시 열(대상에 있음·NULL 허용·쓰기 열 아님), 표시 값(날짜 열은 SYSDATE만·숫자 열은 숫자·문자 길이), 같은 대상 다중 매핑을 어기면 ERROR. 원본 조건(`Where`)은 WARN(계획은 MARK 허용이었으나 조건 밖 행도 표시되므로 경고로 알린다). 전체 이관 모드는 WARN(대조 안 함). 승인 전은 INFO. `증분 기준`에는 소프트 삭제 열로 거르는 조건 WARN(C23)과 "원본에서 지운 행은 대상에 남음" 안내를 붙였다.
+  - 실행 후 검증: **P8-a부터 증분·CDC 실행의 P01이 "원본 전체 vs 이번에 쓴 행"을 비교해 항상 ERROR였던 문제를 고쳤다.** 증분·CDC면 원본 범위 ↔ 대상 전체(MARK면 표시 안 된 행)를 비교하고, 대상이 많으면 "원본에 없는 대상 n행" WARN. P02~P06은 실행 범위를 정할 수 없어 SKIP 한 줄로 알린다.
+  - 화면: 컬럼 매핑 설정 카드에 원본 삭제·표시 열(후보 = NULL 허용이면서 쓰지 않는 열)·표시 값·승인 상태와 취소. 전략 화면에 삭제 표시 상한(증분·CDC)·삭제 대조 주기(CDC). 실행 화면 진행 카드에 매핑별 대조 줄, 결과 알림에 승인 링크.
+  - 함께 고친 버그: `SqlSourceAnalyzer`의 DESCRIBE 캐시 키가 열 목록을 빼고 있어, 같은 SQL을 다른 DESCRIBE로 다시 분석해도 옛 결과가 돌아왔다(시험 순서에 따라 `SqlSourceServiceTests`가 가끔 실패). 키에 열 목록을 넣었다.
+  - 시험: `Engine/KeyDiffTests.cs`(분류·해시 충돌·배치 경계·순서 깨짐·수집 한도·키 형식), `Engine/ReconcileRunTests.cs`(승인 전 대기 → Dry Run 예정 → 승인 뒤 표시 → 재실행 그대로 → 다시 나타나면 해제, 상한·원본 0개 멈춤, SYNC 행 수 대조 주기, SQL 원본 건너뜀, 대조 실패는 경고, 대조 저장소 없음·전체 모드, Oracle SQL 문자열), `ValidationEngineTests.RunPre_delete_*`·`RunPre_incremental_warns_*`·`Mark_value_*`, `PostValidationEngineTests.RunPost_incremental_*`, `CoreUnitTests.JobFile_delete_*`, `RunLogicTests.Reconcile_lines_*`·`Changing_delete_settings_*`, `SqlSourceServiceTests.VirtualTable_is_not_served_*`, Oracle IT `ReconcileOracleTests`(이 환경에는 DSN이 없어 실행 못 함).
 - 순서: ① 유령 행 표시(3.6, 삭제 없이도 들어감) + C23 → ② 키·해시 대조(4.2) + `MARK` → ③ `HARD` + 3.3 규칙 전부(▾ 대화상자·C20~C22·첫 실행 Dry Run·상한·보관·로그·되돌리기) → ④ `FLASHBACK` 감지(4.2b)는 요구가 있을 때만.
 - 완료 조건(자동 시험):
   - `MigrationEngineTests`: 원본에서 2행 삭제 → 삭제 꺼짐이면 대상 유지 + 스냅샷에 차이 2 표시 / 켜짐이면 Dry Run이 2건 보고하고 승인 전 대상 불변 / 승인 뒤 보관 테이블(가짜)에 2행 복사된 **뒤** 대상에서 삭제 / 보관 실패 시 삭제 0건.

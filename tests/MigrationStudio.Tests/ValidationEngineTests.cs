@@ -90,6 +90,77 @@ namespace MigrationStudio.Tests
         }
 
         [Fact]
+        public async Task RunPre_delete_mark_checks_column_value_target_and_approval()
+        {
+            var ctx = SampleContext();
+            ctx.Job.Strategy.Mode = ExecutionModes.Incremental;
+            var customer = ctx.Job.Mappings.First(m => m.Id == "tm-customer");
+            customer.DeleteMode = DeleteModes.Mark;
+            customer.MarkColumn = "MEMBER_GRADE";
+            customer.MarkValue = "DELETED";
+            var items = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+            var pending = items.Single(i => i.Check == "삭제 반영" && i.MappingId == "tm-customer");
+            Assert.Equal(CheckLevels.Info, pending.Level);
+            Assert.Contains("승인 전", pending.Detail);
+            Assert.DoesNotContain(items, i => i.Check == "증분 기준" && i.MappingId == "tm-customer" && i.Detail.Contains("원본에서 지운 행은 대상에 남음"));
+
+            customer.DeleteApprovedAt = "2026-10-09 10:00:00";
+            items = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+            Assert.Equal(CheckLevels.Pass, items.Single(i => i.Check == "삭제 반영").Level);
+
+            // NOT NULL 열 · 이관이 쓰는 날짜 열에 문자 값 · 같은 대상을 쓰는 다른 매핑 · SQL 원본
+            customer.MarkColumn = "USE_YN";
+            Assert.Contains("NULL 허용", await DeleteDetail(ctx));
+            customer.MarkColumn = "UPDATED_AT";
+            var detail = await DeleteDetail(ctx);
+            Assert.Contains("원본 값을 매핑함", detail);
+            Assert.Contains("SYSDATE만", detail);
+            customer.MarkColumn = "MEMBER_GRADE";
+            ctx.Job.Mappings.First(m => m.Id == "tm-sql-member").Use = true;
+            Assert.Contains("같은 대상에 쓰는 매핑이 2개", await DeleteDetail(ctx));
+
+            ctx.Job.Strategy.Mode = ExecutionModes.Full;
+            ctx.Job.Mappings.First(m => m.Id == "tm-sql-member").Use = false;
+            items = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+            var full = items.Single(i => i.Check == "삭제 반영");
+            Assert.Equal(CheckLevels.Warn, full.Level);
+            Assert.Contains("전체 이관에서는 삭제를 대조하지 않음", full.Detail);
+        }
+
+        [Fact]
+        public async Task RunPre_incremental_warns_when_where_filters_by_soft_delete_column()
+        {
+            var ctx = SampleContext();
+            ctx.Job.Strategy.Mode = ExecutionModes.Cdc;
+            ctx.Job.Mappings.First(m => m.Id == "tm-customer").Where = "DEL_YN = 'N'";
+            var items = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+            var item = items.Single(i => i.Check == "증분 기준" && i.MappingId == "tm-customer");
+            Assert.Equal(CheckLevels.Warn, item.Level);
+            Assert.Contains("삭제 표시 열로 거름", item.Detail);
+            Assert.Contains("원본에서 지운 행은 대상에 남음", item.Detail);
+        }
+
+        [Fact]
+        public void Mark_value_must_fit_the_column_type()
+        {
+            Assert.Null(ValidationEngine.MarkValueProblem("SYSDATE", new ColumnMetadata { Name = "DEL_AT", Type = "DATE" }));
+            Assert.NotNull(ValidationEngine.MarkValueProblem("Y", new ColumnMetadata { Name = "DEL_AT", Type = "DATE" }));
+            Assert.NotNull(ValidationEngine.MarkValueProblem("SYSDATE", new ColumnMetadata { Name = "DEL_YN", Type = "CHAR(1)" }));
+            Assert.NotNull(ValidationEngine.MarkValueProblem("YES", new ColumnMetadata { Name = "DEL_YN", Type = "CHAR(1)" }));
+            Assert.Null(ValidationEngine.MarkValueProblem("1", new ColumnMetadata { Name = "DEL_FLAG", Type = "NUMBER(1)" }));
+            Assert.NotNull(ValidationEngine.MarkValueProblem("Y", new ColumnMetadata { Name = "DEL_FLAG", Type = "NUMBER(1)" }));
+            Assert.NotNull(ValidationEngine.MarkValueProblem(" ", new ColumnMetadata { Name = "DEL_YN", Type = "CHAR(1)" }));
+        }
+
+        private static async Task<string> DeleteDetail(ValidationContext ctx)
+        {
+            var items = await new ValidationEngine(Fake(ctx)).RunPreAsync(ctx, null, CancellationToken.None);
+            var item = items.Single(i => i.Check == "삭제 반영" && i.MappingId == "tm-customer");
+            Assert.Equal(CheckLevels.Error, item.Level);
+            return item.Detail;
+        }
+
+        [Fact]
         public async Task RunPre_missing_meta_stops_with_error()
         {
             var ctx = SampleContext();

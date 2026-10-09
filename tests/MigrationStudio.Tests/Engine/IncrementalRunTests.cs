@@ -223,12 +223,17 @@ namespace MigrationStudio.Tests.Engine
             private readonly string _writeMode;
             private readonly string _storeMode;
 
-            internal World(string writeMode, int rows, string storeMode = "TARGET")
+            internal World(string writeMode, int rows, string storeMode = "TARGET", bool markColumn = false)
             {
                 _writeMode = writeMode;
                 _storeMode = storeMode;
                 Source = Table("SRC");
                 Target = Table("TGT");
+                if (markColumn)
+                {
+                    // 대상에만 있는 삭제 표시 열(NULL = 살아 있음). 매핑하지 않으므로 이관이 건드리지 않는다.
+                    Target = new MemoryTable("TGT", Target.Columns.Concat(new[] { new ColumnMetadata { Name = "DEL_AT", Type = "VARCHAR2(20)", Nullable = true } }), new[] { "ID" });
+                }
                 for (var i = 1; i <= rows; i++) Source.Rows.Add(Row(i));
             }
 
@@ -237,6 +242,10 @@ namespace MigrationStudio.Tests.Engine
             internal MemoryCheckpointStore Store { get; private set; } = new MemoryCheckpointStore();
             internal ManualClock Clock { get; private set; }
             internal MemoryTargetFactory TargetFactory { get; private set; }
+            /// <summary>있으면 엔진에 삭제 대조 저장소로 붙인다.</summary>
+            internal MemoryReconcileStore Reconciler { get; set; }
+            /// <summary>매핑을 손볼 때(삭제 처리·표시 열 등).</summary>
+            internal Action<Mapping> ConfigureMapping { get; set; }
             internal MigrationStrategy LastStrategy { get; private set; }
 
             /// <summary>원본 DB 시각. 행 수정시각(Base + n분)과 같은 시간선 — 행을 넣거나 고친 뒤 그 시각 이상으로 올려야 창 안에 들어온다.</summary>
@@ -281,6 +290,7 @@ namespace MigrationStudio.Tests.Engine
                     Mappings = new List<Mapping> { mapping }
                 };
                 if (strategy != null) strategy(job.Strategy);
+                if (ConfigureMapping != null) ConfigureMapping(mapping);
                 LastStrategy = job.Strategy;
                 var metadata = new RunMetadata
                 {
@@ -299,6 +309,7 @@ namespace MigrationStudio.Tests.Engine
                 TargetFactory = new MemoryTargetFactory(Target) { Checkpoints = Store };
                 var sourceFactory = new MemorySourceFactory(Source) { Now = () => SourceNow };
                 var engine = new MigrationEngine(spec, sourceFactory, TargetFactory, Store, listener, Clock);
+                engine.Reconciler = Reconciler;
                 if (configure != null) configure(engine);
                 await engine.RunAsync(CancellationToken.None);
                 return new RunResult { Engine = engine, Listener = listener, Plan = plan };

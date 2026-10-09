@@ -51,6 +51,16 @@ namespace MigrationStudio.Core.Engine
         private bool _windowWarned;
         private const int MaxConsecutiveFailures = 5;
 
+        private DateTime? _lastReconcileAt;
+        private bool _reconcileWarned;
+        /// <summary>한 번의 대조에서 모아 두는 표시 후보 상한(메모리). 넘으면 표시하지 않고 멈춘다.</summary>
+        internal const int MaxReconcileCollect = 200000;
+        /// <summary>표시 상한의 바닥값 — 작은 테이블에서 비율 상한이 1~2행이 되어 정상 삭제까지 막지 않게.</summary>
+        internal const int MinDeleteCap = 10;
+
+        /// <summary>삭제 대조 저장소(원본·대상 키 비교, 대상 표시). 없으면 대조하지 않는다(삭제 표시 매핑이 있으면 한 번 경고).</summary>
+        public IReconcileStore Reconciler { get; set; }
+
         /// <summary>주기 사이 대기. 시험에서는 가짜 시계를 움직이는 함수로 바꿔 끼운다.</summary>
         public Func<TimeSpan, CancellationToken, Task> CycleDelay { get; set; } = (span, token) => Task.Delay(span, token);
 
@@ -127,6 +137,11 @@ namespace MigrationStudio.Core.Engine
                     else
                     {
                         await RunPassAsync(_stop.Token).ConfigureAwait(false);
+                        if (!_stop.IsCancellationRequested && _tasks.All(t => t.Status == "done") && IsIncrementalStrategy())
+                        {
+                            // 1회성 증분은 실행할 때마다 삭제 표시 매핑만 대조한다(행 수 차이는 실행 후 검증 P01이 보여 준다).
+                            await ReconcileAsync(false, _stop.Token).ConfigureAwait(false);
+                        }
                         if (_stop.IsCancellationRequested)
                         {
                             Finish("stopped", null);
@@ -259,6 +274,16 @@ namespace MigrationStudio.Core.Engine
                 Log("CYCLE", "주기 " + _cycle + " 완료 · 새 " + Number(cycleWritten) + "행 (삽입 " + Number(cycleInserted) + " · 갱신 " + Number(cycleUpdated) +
                     (cycleRejected > 0 ? " · 거부 " + Number(cycleRejected) : "") + ") · 누적 " + Number(_syncWritten) + "행");
 
+                if (_lastReconcileAt == null || (_clock.Now - _lastReconcileAt.Value).TotalMinutes >= ReconcileIntervalMinutes())
+                {
+                    // 동기화는 삭제를 따르지 않는 매핑도 행 수를 세어 "원본에 없는 대상 행"을 숨기지 않는다.
+                    await ReconcileAsync(true, _stop.Token).ConfigureAwait(false);
+                    if (_stop.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                }
+
                 if (maxHours > 0 && (_clock.Now - _startedAt).TotalHours >= maxHours)
                 {
                     Log("DONE", "최대 실행 시간 " + maxHours + "시간 도달 — 동기화 종료 · 주기 " + _cycle + "회 · 누적 " + Number(_syncWritten) + "행" +
@@ -308,6 +333,154 @@ namespace MigrationStudio.Core.Engine
             }
             return CheckpointValue(new object[] { upper }, 0);
         }
+
+        /// <summary>
+        /// 삭제 대조. MARK 매핑: 원본·대상 키를 비교해 원본에 없는 대상 행을 표시하고, 원본에 다시 나타난 표시 행은 표시를 지운다
+        /// (승인됐고 Dry Run이 아니고 상한 안일 때만). NONE 매핑(<paramref name="countUnmarked"/>일 때): 원본·대상 행 수만 센다.
+        /// 대조가 실패해도 이관·동기화는 계속한다 — 삭제 반영은 부가 단계이고, 다음 대조가 다시 맞춘다.
+        /// </summary>
+        private async Task ReconcileAsync(bool countUnmarked, CancellationToken cancellationToken)
+        {
+            _lastReconcileAt = _clock.Now;
+            foreach (var task in _tasks)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                var item = task.Item;
+                var mark = DeleteModes.IsMark(item.Mapping.DeleteMode);
+                if (!mark && !countUnmarked)
+                {
+                    continue;
+                }
+
+                if (item.Mapping.IsSql)
+                {
+                    // SQL 원본은 테이블 이름이 없어 키·행 수를 따로 셀 수 없다(삭제 표시는 검증에서 막힘). 따라가지 않는 SQL 매핑은 실행 후 검증 P01이 센다.
+                    continue;
+                }
+
+                if (Reconciler == null)
+                {
+                    if (mark && !_reconcileWarned)
+                    {
+                        _reconcileWarned = true;
+                        Log("WARN", "삭제 대조를 할 수 없는 실행 환경 — 원본에서 지운 행을 표시하지 않음");
+                    }
+                    continue;
+                }
+
+                try
+                {
+                    var snapshot = mark
+                        ? await ReconcileMarkAsync(task, cancellationToken).ConfigureAwait(false)
+                        : await ReconcileCountAsync(task, cancellationToken).ConfigureAwait(false);
+                    lock (_gate)
+                    {
+                        snapshot.TotalMarked = (task.Reconcile != null ? task.Reconcile.TotalMarked : 0) + snapshot.Marked;
+                        task.Reconcile = snapshot;
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lock (_gate)
+                    {
+                        task.Reconcile = new ReconcileSnapshot
+                        {
+                            At = _clock.Now, Mode = item.Mapping.DeleteMode, Error = SafeError(ex),
+                            TotalMarked = task.Reconcile != null ? task.Reconcile.TotalMarked : 0
+                        };
+                    }
+                    Log("WARN", item.Label + ": 삭제 대조 실패 — 표시하지 않음, 다음 대조에서 다시 · " + SafeError(ex));
+                }
+            }
+            EmitSnapshot(true);
+        }
+
+        private async Task<ReconcileSnapshot> ReconcileCountAsync(TaskState task, CancellationToken cancellationToken)
+        {
+            var source = await Reconciler.CountAsync(task.Item, false, cancellationToken).ConfigureAwait(false);
+            var target = await Reconciler.CountAsync(task.Item, true, cancellationToken).ConfigureAwait(false);
+            if (target > source)
+            {
+                Log("INFO", task.Item.Label + ": 대상이 원본보다 " + Number(target - source) + "행 많음 (원본 " + Number(source) + " · 대상 " + Number(target) +
+                    ") — 삭제를 따라가지 않는 매핑이라 원본에서 지운 행이 남아 있을 수 있음");
+            }
+            return new ReconcileSnapshot { At = _clock.Now, Mode = DeleteModes.None, SourceRows = source, TargetRows = target };
+        }
+
+        private async Task<ReconcileSnapshot> ReconcileMarkAsync(TaskState task, CancellationToken cancellationToken)
+        {
+            var item = task.Item;
+            KeyDiffResult diff;
+            using (var source = await Reconciler.OpenKeysAsync(item, false, cancellationToken).ConfigureAwait(false))
+            using (var target = await Reconciler.OpenKeysAsync(item, true, cancellationToken).ConfigureAwait(false))
+            {
+                diff = await KeyDiff.RunAsync(source, target, MaxReconcileCollect, cancellationToken).ConfigureAwait(false);
+            }
+
+            var snapshot = new ReconcileSnapshot
+            {
+                At = _clock.Now, Mode = DeleteModes.Mark, SourceRows = diff.SourceKeys,
+                TargetRows = diff.TargetKeys - diff.AlreadyMarked - diff.UnmarkCount,
+                MarkCandidates = diff.MarkCount, UnmarkCandidates = diff.UnmarkCount,
+                AlreadyMarked = diff.AlreadyMarked, SourceOnly = diff.SourceOnly,
+                Approved = !string.IsNullOrEmpty(item.Mapping.DeleteApprovedAt),
+                Samples = diff.Mark.Take(5).Select(k => (k.Text ?? "").Replace(ReconcileKeySeparator, ", ")).ToList()
+            };
+            var cap = Math.Max(MinDeleteCap, (long)Math.Ceiling(Math.Max(0, DeleteMaxRatio()) * Math.Max(0, snapshot.TargetRows)));
+            if (diff.MarkCount > 0 && diff.SourceKeys == 0)
+            {
+                snapshot.Blocked = "원본 키가 0개 — 접속·스키마·조건을 확인하세요(전부 지워진 것으로 보고 표시하지 않음)";
+            }
+            else if (diff.MarkCount > cap)
+            {
+                snapshot.Blocked = "표시할 행 " + Number(diff.MarkCount) + "이 상한 " + Number(cap) + "(살아 있는 대상의 " +
+                    (DeleteMaxRatio() * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%) 초과 — 조건·다중 매핑·원본 접속을 확인하세요";
+            }
+            else if (diff.Truncated)
+            {
+                snapshot.Blocked = "표시 후보가 " + Number(MaxReconcileCollect) + "행을 넘어 한 번에 처리하지 않음";
+            }
+
+            var apply = !IsDry() && snapshot.Approved && snapshot.Blocked == null;
+            if (apply)
+            {
+                if (diff.Mark.Count > 0) snapshot.Marked = await Reconciler.SetMarkAsync(item, diff.Mark, true, cancellationToken).ConfigureAwait(false);
+                if (diff.Unmark.Count > 0) snapshot.Unmarked = await Reconciler.SetMarkAsync(item, diff.Unmark, false, cancellationToken).ConfigureAwait(false);
+            }
+
+            var head = item.Label + ": 삭제 대조 · 원본 " + Number(snapshot.SourceRows) + " · 대상 " + Number(snapshot.TargetRows) + " · ";
+            if (snapshot.Blocked != null)
+            {
+                Log("WARN", head + "원본에 없는 대상 " + Number(diff.MarkCount) + "행을 표시하지 않음 — " + snapshot.Blocked);
+            }
+            else if (apply)
+            {
+                if (snapshot.Marked > 0 || snapshot.Unmarked > 0)
+                {
+                    Log("DELETE", head + "삭제 표시 " + Number(snapshot.Marked) + "행" + (snapshot.Unmarked > 0 ? " · 다시 나타나 표시 해제 " + Number(snapshot.Unmarked) + "행" : "") +
+                        " (" + item.Mapping.MarkColumn + ")");
+                }
+            }
+            else if (diff.MarkCount > 0 || diff.UnmarkCount > 0)
+            {
+                Log(IsDry() ? "DRY" : "WARN", head + (IsDry() ? "표시 예정 " : "승인 전이라 표시하지 않음 · 대기 ") + Number(diff.MarkCount) + "행" +
+                    (diff.UnmarkCount > 0 ? " · 표시 해제 " + Number(diff.UnmarkCount) + "행" : "") +
+                    (snapshot.Samples.Count > 0 ? " (예: " + string.Join(" / ", snapshot.Samples) + ")" : "") +
+                    (snapshot.Approved ? "" : " — 실행 화면에서 승인하면 다음 실행부터 표시"));
+            }
+            return snapshot;
+        }
+
+        /// <summary>여러 열 키의 정규화 문자열 구분자(CHR(31)). 표본을 보여 줄 때 ", "로 바꾼다.</summary>
+        internal const string ReconcileKeySeparator = "\u001f";
 
         /// <summary>다음 주기의 계획: 같은 매핑, 워터마크 다음부터, 범위 하나. 읽을 행 수는 미리 세지 않는다(주기마다 COUNT를 돌리지 않기 위해).</summary>
         private static PlanItem NextCycleItem(PlanItem item, string watermark)
@@ -1297,6 +1470,13 @@ namespace MigrationStudio.Core.Engine
         private TimeSpan PollInterval() { return TimeSpan.FromSeconds(Math.Max(1, _spec.Job.Strategy.PollIntervalSeconds)); }
         private int MaxRunHours() { return Math.Max(0, _spec.Job.Strategy.MaxRunHours); }
         private int LagSeconds() { return Math.Max(0, _spec.Job.Strategy.LagSeconds); }
+        private int ReconcileIntervalMinutes() { return Math.Max(1, _spec.Job.Strategy.ReconcileIntervalMinutes); }
+        private double DeleteMaxRatio() { return _spec.Job.Strategy.DeleteMaxRatio; }
+        private bool IsIncrementalStrategy()
+        {
+            var mode = _spec.Job.Strategy != null ? _spec.Job.Strategy.Mode : null;
+            return string.Equals(mode, ExecutionModes.Incremental, StringComparison.Ordinal) || string.Equals(mode, ExecutionModes.Cdc, StringComparison.Ordinal);
+        }
         private string StoreText() { return string.Equals(_spec.CheckpointStore, "LOCAL", StringComparison.Ordinal) ? "로컬 파일" : "대상 DB(" + _spec.ControlPrefix + "CHECKPOINT)"; }
         private static string Number(long n) { return n.ToString("N0", CultureInfo.GetCultureInfo("en-US")); }
         private static string Duration(double seconds) { return TimeSpan.FromSeconds(Math.Max(0, seconds)).ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture); }
@@ -1329,6 +1509,8 @@ namespace MigrationStudio.Core.Engine
             public int WritingWorkers;
             public long LastLogged;
             public Exception LastError;
+            /// <summary>마지막 삭제 대조 결과. 주기가 바뀌어도 유지한다.</summary>
+            public ReconcileSnapshot Reconcile;
             public List<RangeState> Ranges = new List<RangeState>();
 
             /// <summary>다음 주기를 위해 이번 주기 수치를 비운다. Item(워터마크)은 호출자가 바꾼다.</summary>
@@ -1350,7 +1532,8 @@ namespace MigrationStudio.Core.Engine
                     Updated = Updated, Rejected = Rejected, Commits = Commits, Checkpoint = Checkpoint,
                     Elapsed = StartedAt == default ? 0 : ((EndedAt == default ? now : EndedAt) - StartedAt).TotalSeconds,
                     RateNow = StartedAt == default ? 0 : Written / Math.Max(0.001, ((EndedAt == default ? now : EndedAt) - StartedAt).TotalSeconds),
-                    Ranges = Ranges.Select(r => new RangeSnapshot { From = r.Range.From, To = r.Range.To, Last = r.Last, Rows = r.Range.Rows, Done = r.Written, Status = r.Status }).ToList()
+                    Ranges = Ranges.Select(r => new RangeSnapshot { From = r.Range.From, To = r.Range.To, Last = r.Last, Rows = r.Range.Rows, Done = r.Written, Status = r.Status }).ToList(),
+                    Reconcile = Reconcile
                 };
             }
         }

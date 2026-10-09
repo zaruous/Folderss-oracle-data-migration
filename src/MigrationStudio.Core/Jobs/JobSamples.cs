@@ -156,7 +156,9 @@ namespace MigrationStudio.Core.Jobs
                 Workers = s.Workers,
                 PollIntervalSeconds = s.PollIntervalSeconds,
                 MaxRunHours = s.MaxRunHours,
-                LagSeconds = s.LagSeconds
+                LagSeconds = s.LagSeconds,
+                ReconcileIntervalMinutes = s.ReconcileIntervalMinutes,
+                DeleteMaxRatio = s.DeleteMaxRatio
             };
         }
 

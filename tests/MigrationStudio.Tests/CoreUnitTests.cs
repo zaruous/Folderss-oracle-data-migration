@@ -88,6 +88,34 @@ namespace MigrationStudio.Tests
         }
 
         [Fact]
+        public void JobFile_delete_settings_roundtrip_only_when_marking()
+        {
+            var settings = GoldenTestHelpers.SettingsFromGolden();
+            var job = GoldenTestHelpers.SampleJob();
+            var json = JobFile.Serialize(job, settings);
+            Assert.DoesNotContain("deleteMode", json);
+            Assert.DoesNotContain("reconcileIntervalMinutes", json);
+            Assert.DoesNotContain("deleteMaxRatio", json);
+            Assert.Equal(DeleteModes.None, JobFile.Parse(json).Mappings[0].DeleteMode);
+
+            var m = job.Mappings[0];
+            m.DeleteMode = DeleteModes.Mark;
+            m.MarkColumn = "MEMBER_GRADE";
+            m.MarkValue = "DELETED";
+            m.DeleteApprovedAt = "2026-10-09 10:00:00";
+            job.Strategy.ReconcileIntervalMinutes = 360;
+            job.Strategy.DeleteMaxRatio = 0.3;
+            var parsed = JobFile.Parse(JobFile.Serialize(job, settings));
+            Assert.Equal(DeleteModes.Mark, parsed.Mappings[0].DeleteMode);
+            Assert.Equal("MEMBER_GRADE", parsed.Mappings[0].MarkColumn);
+            Assert.Equal("DELETED", parsed.Mappings[0].MarkValue);
+            Assert.Equal("2026-10-09 10:00:00", parsed.Mappings[0].DeleteApprovedAt);
+            Assert.Equal(360, parsed.Strategy.ReconcileIntervalMinutes);
+            Assert.Equal(0.3, parsed.Strategy.DeleteMaxRatio, 6);
+            Assert.Contains("deleteMode: MARK", JobFile.ToYaml(job, settings));
+        }
+
+        [Fact]
         public void JobFile_roundtrip_serialize_parse_preserves_job()
         {
             var settings = GoldenTestHelpers.SettingsFromGolden();

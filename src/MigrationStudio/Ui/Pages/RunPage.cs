@@ -33,6 +33,7 @@ namespace MigrationStudio.Ui.Pages
         // 갱신할 칸들(Rebuild에서 만든다)
         private TextBlock _rowsText, _ofText, _pctText, _currentText, _runIdText;
         private TextBlock _syncText;
+        private TextBlock _reconcileText;
         private Border _statePill;
         private ProgressBarView _bar;
         private readonly Dictionary<string, TextBlock> _stats = new Dictionary<string, TextBlock>();
@@ -318,6 +319,28 @@ namespace MigrationStudio.Ui.Pages
                 if (view.State == RunStates.Done && !view.Dry)
                 {
                     links.Children.Add(Kit.LinkButton("실행 후 검증 ›", () => { State.Ui.ValTab = "post"; _host.GoToStep(3); }));
+                }
+
+                foreach (var task in RunLogic.ApprovalCandidates(snap))
+                {
+                    var mapping = State.Mapping(task.Key);
+                    if (mapping == null || !DeleteModes.IsMark(mapping.DeleteMode) || !string.IsNullOrEmpty(mapping.DeleteApprovedAt))
+                    {
+                        continue;
+                    }
+
+                    var candidate = task;
+                    var approve = Kit.LinkButton("삭제 표시 승인… (" + mapping.Target + ")", () =>
+                    {
+                        if (RunDialogs.ConfirmDeleteMark(_host.Owner, State.ProfileForRole(Roles.Target), mapping, candidate.Reconcile))
+                        {
+                            mapping.DeleteApprovedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+                            State.MarkChanged();
+                            Rebuild();
+                        }
+                    });
+                    approve.Margin = new Thickness(0, 0, 12, 0);
+                    links.Children.Add(approve);
                 }
 
                 if (view.State != RunStates.Done)
@@ -667,6 +690,12 @@ namespace MigrationStudio.Ui.Pages
             _syncText.Margin = new Thickness(0, 0, 0, 8);
             _syncText.Visibility = Visibility.Collapsed;
             body.Children.Add(_syncText);
+            _reconcileText = Theme.Secondary("");
+            _reconcileText.FontSize = 12;
+            _reconcileText.TextWrapping = TextWrapping.Wrap;
+            _reconcileText.Margin = new Thickness(0, 0, 0, 8);
+            _reconcileText.Visibility = Visibility.Collapsed;
+            body.Children.Add(_reconcileText);
             _bar = new ProgressBarView(8);
             _bar.Root.Margin = new Thickness(0, 0, 0, 12);
             body.Children.Add(_bar.Root);
@@ -814,6 +843,9 @@ namespace MigrationStudio.Ui.Pages
             var syncLine = RunLogic.SyncSummary(snap, DateTime.Now);
             _syncText.Text = syncLine ?? "";
             _syncText.Visibility = syncLine == null ? Visibility.Collapsed : Visibility.Visible;
+            var reconcile = RunLogic.ReconcileLines(snap, view != null && view.Dry);
+            _reconcileText.Text = string.Join("\n", reconcile);
+            _reconcileText.Visibility = reconcile.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
 
             _stats["rate"].Text = snap != null && state == RunStates.Running ? RunLogic.Rate(snap.Rate) + " 행/초" : "—";
             _stats["elapsed"].Text = snap != null ? RunLogic.Duration(snap.Elapsed) : "—";

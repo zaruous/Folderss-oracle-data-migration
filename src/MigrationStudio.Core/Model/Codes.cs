@@ -17,6 +17,26 @@ namespace MigrationStudio.Core.Model
         public const string Cdc = "CDC";
     }
 
+    /// <summary>
+    /// 원본에서 지운 행을 대상에 어떻게 반영하나(매핑 단위). 증분·CDC에서만 쓴다.
+    /// NONE: 따라가지 않음(대상에 남음 — 차이만 보임). MARK: 대상 행을 지우지 않고 표시 열에 값을 넣음(되돌릴 수 있음).
+    /// </summary>
+    public static class DeleteModes
+    {
+        public const string None = "NONE";
+        public const string Mark = "MARK";
+
+        public static bool IsMark(string mode)
+        {
+            return string.Equals(mode, Mark, StringComparison.Ordinal);
+        }
+
+        public static string Label(string mode)
+        {
+            return IsMark(mode) ? "대상에 삭제 표시" : "따라가지 않음";
+        }
+    }
+
     public static class ErrorPolicies
     {
         /// <summary>행 오류는 오류 테이블(LOG ERRORS)에 남기고 계속, 일시 오류는 3회 재시도.</summary>

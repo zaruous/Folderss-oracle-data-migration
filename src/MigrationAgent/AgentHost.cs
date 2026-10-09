@@ -311,6 +311,11 @@ namespace MigrationAgent
             }
 
             _engine = new MigrationEngine(spec, source, target, store, listener, new SystemRunClock(), recorder);
+            if (source is OracleSourceFactory)
+            {
+                // 삭제 대조는 원본·대상 양쪽을 읽고 대상에 표시하므로 Oracle 실행에서만 붙인다(시험 어댑터에는 없음).
+                _engine.Reconciler = new OracleReconcileStore(spec.Source, spec.Target);
+            }
             _engineTask = Task.Run(() => _engine.RunAsync(_hostCts.Token));
         }
 

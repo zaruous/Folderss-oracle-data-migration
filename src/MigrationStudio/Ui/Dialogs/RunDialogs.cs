@@ -182,6 +182,58 @@ namespace MigrationStudio.Ui.Modals
             return ok;
         }
 
+        /// <summary>
+        /// 삭제 표시 승인. 대조에서 본 건수·표본을 보여 주고 확인 체크를 받는다. 승인은 작업에 저장되고 다음 실행부터 표시한다
+        /// (지금 도는 동기화는 시작할 때의 작업을 쓰므로 바뀌지 않음).
+        /// </summary>
+        public static bool ConfirmDeleteMark(Window owner, ConnectionProfile target, Mapping mapping, MigrationStudio.Core.Engine.ReconcileSnapshot result)
+        {
+            var window = DialogKit.Create(owner, "삭제 표시 승인", 500);
+            var body = DialogKit.Body(window);
+            var production = target != null && target.Color == "red";
+            body.Children.Add(DialogKit.Target(target, "대상" + (production ? " 운영 DB" : "") + "의 " + mapping.Target + "에서 원본에 없는 행을 표시합니다."));
+            var lines = new List<string>
+            {
+                "표시: " + mapping.MarkColumn + " = " + mapping.MarkValue + " (행은 지우지 않음)",
+                "이번 대조: 원본에 없는 대상 " + (result != null ? result.MarkCandidates.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("en-US")) : "?") + "행" +
+                    (result != null && result.Samples != null && result.Samples.Count > 0 ? " · 예: " + string.Join(" / ", result.Samples) : ""),
+                "다음 실행부터 대조할 때마다 표시하고, 원본에 다시 나타난 행은 표시를 NULL로 되돌림",
+                "한 번에 살아 있는 대상 행의 일정 비율(전략의 상한)을 넘으면 표시하지 않고 멈춤",
+                "표시 처리·열·값을 바꾸면 승인이 지워짐"
+            };
+            var list = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            foreach (var line in lines)
+            {
+                var t = Theme.Text("• " + line);
+                t.TextWrapping = TextWrapping.Wrap;
+                t.FontSize = 12;
+                t.Margin = new Thickness(0, 0, 0, 4);
+                list.Children.Add(t);
+            }
+
+            body.Children.Add(list);
+            if (!string.IsNullOrWhiteSpace(mapping.Where))
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = "원본 조건(" + mapping.Where.Trim() + ") 밖의 대상 행도 표시됩니다.",
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Foreground = Theme.Warning
+                });
+            }
+
+            var check = DialogKit.Check("표시될 행을 확인했습니다");
+            body.Children.Add(check);
+            var ok = false;
+            var approve = DialogKit.PrimaryButton("승인");
+            approve.IsEnabled = false;
+            check.Checked += (s, e) => approve.IsEnabled = true;
+            check.Unchecked += (s, e) => approve.IsEnabled = false;
+            approve.Click += (s, e) => { ok = true; window.DialogResult = true; };
+            body.Children.Add(DialogKit.Buttons(DialogKit.CancelButton("취소", true), approve));
+            Show(window);
+            return ok;
+        }
+
         private static bool Show(Window window)
         {
             if (AppServices.DevHostCaptureMode)
