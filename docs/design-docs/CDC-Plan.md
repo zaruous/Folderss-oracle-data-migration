@@ -11,6 +11,7 @@
 1. 기본 동작은 **추가·변경 반영**(폴링 + MERGE). 원본 SELECT 권한만으로 돌아가는 방식을 기본으로 한다.
 2. **삭제 전파는 옵션이며 기본 꺼짐.** 기능은 제공하되 위험 경고를 확실하게 보여 준다(3.3).
 3. 삭제 전파의 안전장치는 세 층: **삭제 전 보관 → 수행 내역 로그 → 되돌리기**(3.3). 로그만으로는 안전장치로 치지 않는다.
+   보관 위치(대상 DB 테이블 / 로컬 JSON 파일)는 삭제를 켤 때 **사용자가 직접 고른다.** 자동 선택·자동 대체는 두지 않는다.
 4. 로그 기반(LogMiner)은 DBA가 DB를 바꿔 주는 환경에서만 되는 방식이므로 별도 단계로 미룬다.
 
 ---
@@ -63,7 +64,7 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 ### 3.1 모델·작업 파일
 - `MigrationStrategy`에 추가(모두 선택 필드, `JobFile` 읽기는 `TryGetProperty`라 v2 유지 가능):
   - `PollIntervalSeconds`(기본 60), `LagSeconds`(지연 창, 기본 300), `CdcSource`(`QUERY`·`LOGMINER`).
-  - 삭제 전파: `DeleteMode`(`NONE` 기본·`SOFT_COLUMN`·`HARD`), `DeleteDetect`(`KEYDIFF`·`FLASHBACK`), `DeleteCheckIntervalMinutes`(대조 주기, 기본 60), `DeleteMaxRatio`(한 번에 지울 수 있는 대상 비율 상한, 기본 0.1), `DeleteKeepDays`(보관 행 보존 일수, 기본 90).
+  - 삭제 전파: `DeleteMode`(`NONE` 기본·`SOFT_COLUMN`·`HARD`), `DeleteBackup`(`TABLE`·`FILE`, `HARD`면 필수·기본값 없음), `DeleteDetect`(`KEYDIFF`·`FLASHBACK`), `DeleteCheckIntervalMinutes`(대조 주기, 기본 60), `DeleteMaxRatio`(한 번에 지울 수 있는 대상 비율 상한, 기본 0.1), `DeleteKeepDays`(보관 행 보존 일수, 기본 90).
   - `IncrementalBy`의 뜻을 확정: 매핑의 `CheckpointColumn`이 곧 증분 기준이다. 전략 수준 `IncrementalBy`(PK·Timestamp·Sequence·SCN)는 **힌트/기본값**으로만 두거나 없앤다(둘 다 두면 어느 쪽이 맞는지 모호 — 현재 코드가 그 상태).
 - 작업 파일 예제(`JobSamples`)·YAML 쓰기(`JobFile` 748행 근처)·골든 테스트 영향 확인. 골든은 바꾸지 않고 새 필드는 기본값일 때 쓰지 않는다.
 
@@ -87,10 +88,10 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 | 켤 수 있는 매핑 | **조건(`Where`) 없는 1:1 매핑, 그 대상 테이블을 쓰는 매핑이 하나뿐일 때만.** 조건이 있거나 같은 대상에 매핑이 둘이면(예제의 `TB_MEMBER`) "대상에만 있는 행"이 삭제가 아니라 조건 밖·다른 매핑의 행일 수 있어 ERROR(C20). 그 경우 `SOFT_COLUMN`만 허용 |
 | 첫 실행 | 켠 뒤 첫 대조는 **무조건 Dry Run**: 지울 행 수와 표본 키를 보여 주고 사용자가 승인한 뒤에만 실제 삭제. 오래 꺼 두었다가 켤 때 쌓인 차이를 한 번에 지우는 것이 가장 위험한 순간이다 |
 | 건수 상한 | 지울 행이 대상의 `DeleteMaxRatio`를 넘으면 삭제하지 않고 멈춘다. 매핑 조건·다중 매핑·원본 접속 오류(빈 원본)를 의심하라고 안내 |
-| 삭제 전 보관 (1층) | 지울 행의 **전체 값**을 먼저 복사: 대상 DB `MIG_DELETED_<테이블>`(오류 테이블 `ERR$_`와 같은 명명·생성 규칙, `RUN_ID`·`DELETED_AT` 열 추가). 대상에 CREATE TABLE 권한이 없으면 로컬 파일(`DataDirectory\deleted\<작업>\<RUN_ID>.json`). **복사 → 삭제 → 커밋을 같은 트랜잭션**으로 묶어 "보관 없이 지워진 행"이 생기지 않게 한다. 복사 실패 = 삭제 안 함 |
+| 삭제 전 보관 (1층) | 지울 행의 **전체 값**을 먼저 복사한다. 보관 위치는 삭제를 켤 때 **사용자가 반드시 고른다**(`DeleteBackup` = `TABLE` 또는 `FILE`, "없음"은 선택지에 없음, 자동 선택·자동 대체 없음): `TABLE` = 대상 DB `MIG_DELETED_<테이블>`(오류 테이블 `ERR$_`와 같은 명명·생성 규칙, `RUN_ID`·`DELETED_AT` 열 추가) / `FILE` = 로컬 JSON(`DataDirectory\deleted\<작업>\<RUN_ID>.json`, 경로를 대화상자에 표시). 고르는 시점에 즉시 검사해(테이블 생성 권한·파일 쓰기 가능) 안 되면 삭제 옵션이 켜지지 않는다. 실행 때 고른 위치가 안 되면 **다른 쪽으로 넘어가지 않고 멈춘다**. `TABLE`은 **복사 → 삭제 → 커밋을 같은 트랜잭션**으로 묶어 "보관 없이 지워진 행"이 생기지 않게 한다. `FILE`은 파일 쓰기·flush 성공 뒤에만 삭제를 커밋한다. 복사 실패 = 삭제 안 함 |
 | 수행 내역 로그 (2층) | `RUN_ID`, 매핑, Dry Run 건수, 승인 시각, 실제 삭제 건수, 삭제 키 목록 파일 경로를 실행 로그와 `MIG_RUN_TASK`에 남긴다. 삭제 기록은 `AgentSettings.LogDays` 자동 정리 **대상에서 뺀다**(별도 `DeleteKeepDays`) |
 | 되돌리기 (3층) | 실행 화면 체크포인트 카드 옆에 "삭제 되돌리기…": 보관 테이블·파일에서 `RUN_ID`를 골라 대상에 다시 INSERT. 수동 SQL에 맡기면 사고 때 실수가 난다 |
-| 민감 정보 | 보관 행에 개인정보가 들어간다. 대상 DB 보관을 기본으로 하고 로컬 파일은 권한이 없을 때만, 보존 일수 뒤 정리. 로컬 파일 경로를 실행 로그에 남겨 어디 있는지 알 수 있게 한다 |
+| 민감 정보 | 보관 행에 개인정보가 들어간다. `FILE`을 고르면 대화상자에서 "이 PC에 평문으로 남고 다른 PC에서는 되돌릴 수 없다"를 경고하고, 보존 일수 뒤 정리한다. 파일 경로를 실행 로그에 남겨 어디 있는지 알 수 있게 한다 |
 
 ### 3.4 에이전트·호스트
 - `AgentHost`: `SYNC`는 `done`이 없다. 종료는 `stopped`(사용자) 또는 `failed`만. `--idle-exit`는 적용하지 않는다.
@@ -108,7 +109,7 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 | C18 | `DeleteDetect = FLASHBACK`: `FLASHBACK` 권한, `UNDO_RETENTION` 값, `DeleteCheckInterval < UNDO_RETENTION/2` | ERROR / WARN |
 | C19 | LogMiner 선택 시: ARCHIVELOG, 보조 로깅, 권한, 컨테이너 종류 | ERROR |
 | C20 | `DeleteMode = HARD`인데 매핑에 `Where`가 있거나 같은 대상 테이블을 쓰는 매핑이 둘 이상 | ERROR |
-| C21 | `DeleteMode = HARD`: 보관 테이블을 만들 수 없고(권한) 로컬 보관도 꺼져 있음 | ERROR |
+| C21 | `DeleteMode = HARD`: `DeleteBackup`이 비었거나, 고른 위치가 지금 안 됨(`TABLE`: 생성·INSERT 권한 없음 / `FILE`: 경로 쓰기 불가) — 매 실행 전 다시 검사, 대체 없음 | ERROR |
 | C22 | `DeleteDetect = KEYDIFF`: 해시 대상 열에 정규화 불가 형식(LOB·TIMESTAMP WITH TIME ZONE 등) | WARN |
 
 ### 3.6 화면
@@ -190,7 +191,7 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 - 완료 조건(자동 시험):
   - `MigrationEngineTests`: 원본에서 2행 삭제 → 삭제 꺼짐이면 대상 유지 + 스냅샷에 차이 2 표시 / 켜짐이면 Dry Run이 2건 보고하고 승인 전 대상 불변 / 승인 뒤 보관 테이블(가짜)에 2행 복사된 **뒤** 대상에서 삭제 / 보관 실패 시 삭제 0건.
   - 상한: 대상 100행 중 원본에 없는 행 20행, `DeleteMaxRatio = 0.1` → 삭제 0건 + 중단 사유.
-  - 자격: `Where`가 있는 매핑, 같은 대상에 매핑 둘 → `ValidationEngineTests` C20 ERROR.
+  - 자격: `Where`가 있는 매핑, 같은 대상에 매핑 둘 → `ValidationEngineTests` C20 ERROR. `DeleteBackup` 비움 → C21 ERROR. 실행 중 보관 위치 실패(가짜 보관소가 예외) → 삭제 0건·다른 위치로 대체하지 않음·작업 `failed`.
   - 되돌리기: 보관에서 `RUN_ID`로 2행 복원 → 대상 행 수 원복.
   - Oracle IT: DATE·NUMBER·VARCHAR2 열의 같은 데이터가 양쪽에서 같은 해시, 삭제 1건이 `MIG_DELETED_*`에 남고 같은 트랜잭션으로 커밋.
 
@@ -212,4 +213,4 @@ GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(�
 4. **대상 Oracle 버전·멀티테넌트 여부**(원본 쪽): 19c PDB면 LogMiner 접속 방식이 달라진다.
 5. **운영 방식**: 동기화를 몇 분 주기로, 얼마나 오래(마이그레이션 전환 기간 며칠 vs 상시 복제) 돌릴 것인가? 상시 복제면 Folderss 플러그인(사용자 PC의 하위 프로세스)이 맞는 자리인지부터 의문이다 — PC가 꺼지면 멈춘다.
 6. **라벨**: A로 간다면 화면 라벨을 "CDC" 대신 "변경 동기화"로 바꾸는 데 동의하는가(기대치 관리).
-7. **보관 테이블 위치**: 운영 대상 DB에 `MIG_DELETED_*` 테이블을 만들어도 되는가(제어 테이블 `MIG_*`와 같은 쟁점, 설계서 결정 사항 #2). 안 되면 로컬 파일 보관만 가능하고 다른 PC에서 되돌리기가 안 된다.
+7. ~~보관 테이블 위치~~ **결정됨**: 삭제를 켤 때 `TABLE`(대상 DB `MIG_DELETED_*`) 또는 `FILE`(로컬 JSON)을 사용자가 반드시 고른다. 자동 선택·자동 대체 없음. 운영 대상에 테이블을 못 만드는 환경은 `FILE`을 고르되 단일 PC 복구 한계를 경고로 안내한다.
