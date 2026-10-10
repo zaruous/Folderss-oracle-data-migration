@@ -264,12 +264,42 @@ namespace MigrationStudio.Core.Jobs
                 FetchSize = defaults.FetchSize,
                 ErrorPolicy = defaults.ErrorPolicy,
                 ErrorTable = defaults.ErrorTable,
-                Workers = defaults.Workers
+                Workers = defaults.Workers,
+                PollIntervalSeconds = defaults.PollIntervalSeconds,
+                MaxRunHours = defaults.MaxRunHours,
+                LagSeconds = defaults.LagSeconds,
+                ReconcileIntervalMinutes = defaults.ReconcileIntervalMinutes,
+                DeleteMaxRatio = defaults.DeleteMaxRatio
             };
 
             if (el.ValueKind != JsonValueKind.Object)
             {
                 return s;
+            }
+
+            if (el.TryGetProperty("pollIntervalSeconds", out var poll) && poll.ValueKind == JsonValueKind.Number)
+            {
+                s.PollIntervalSeconds = poll.GetInt32();
+            }
+
+            if (el.TryGetProperty("maxRunHours", out var maxHours) && maxHours.ValueKind == JsonValueKind.Number)
+            {
+                s.MaxRunHours = maxHours.GetInt32();
+            }
+
+            if (el.TryGetProperty("lagSeconds", out var lag) && lag.ValueKind == JsonValueKind.Number)
+            {
+                s.LagSeconds = lag.GetInt32();
+            }
+
+            if (el.TryGetProperty("reconcileIntervalMinutes", out var reconcile) && reconcile.ValueKind == JsonValueKind.Number)
+            {
+                s.ReconcileIntervalMinutes = reconcile.GetInt32();
+            }
+
+            if (el.TryGetProperty("deleteMaxRatio", out var ratio) && ratio.ValueKind == JsonValueKind.Number)
+            {
+                s.DeleteMaxRatio = ratio.GetDouble();
             }
 
             if (el.TryGetProperty("mode", out var mode) && mode.ValueKind == JsonValueKind.String)
@@ -382,6 +412,10 @@ namespace MigrationStudio.Core.Jobs
             map.CheckpointColumn = ReadStringOrNull(m, "checkpointColumn");
             map.Where = ReadString(m, "where") ?? map.Where;
             map.Columns = ParseColumns(m);
+            map.DeleteMode = ReadString(m, "deleteMode") ?? map.DeleteMode;
+            map.MarkColumn = ReadStringOrNull(m, "markColumn");
+            map.MarkValue = ReadStringOrNull(m, "markValue");
+            map.DeleteApprovedAt = ReadStringOrNull(m, "deleteApprovedAt");
         }
 
         private static Model.Mapping DefaultTableMapping()
@@ -742,7 +776,7 @@ namespace MigrationStudio.Core.Jobs
         private static Dictionary<string, object> StrategyDict(MigrationStrategy s)
         {
             s = s ?? new MigrationStrategy();
-            return new Dictionary<string, object>(StringComparer.Ordinal)
+            var d = new Dictionary<string, object>(StringComparer.Ordinal)
             {
                 { "mode", s.Mode },
                 { "incrementalBy", s.IncrementalBy },
@@ -752,6 +786,34 @@ namespace MigrationStudio.Core.Jobs
                 { "errorTable", s.ErrorTable },
                 { "workers", s.Workers }
             };
+            // 동기화 항목은 기본값이 아닐 때만 쓴다 — 기존 작업 파일(v2)·골든 모양을 바꾸지 않기 위해
+            var defaults = new MigrationStrategy();
+            if (s.PollIntervalSeconds != defaults.PollIntervalSeconds)
+            {
+                d["pollIntervalSeconds"] = s.PollIntervalSeconds;
+            }
+
+            if (s.MaxRunHours != defaults.MaxRunHours)
+            {
+                d["maxRunHours"] = s.MaxRunHours;
+            }
+
+            if (s.LagSeconds != defaults.LagSeconds)
+            {
+                d["lagSeconds"] = s.LagSeconds;
+            }
+
+            if (s.ReconcileIntervalMinutes != defaults.ReconcileIntervalMinutes)
+            {
+                d["reconcileIntervalMinutes"] = s.ReconcileIntervalMinutes;
+            }
+
+            if (Math.Abs(s.DeleteMaxRatio - defaults.DeleteMaxRatio) > 1e-9)
+            {
+                d["deleteMaxRatio"] = s.DeleteMaxRatio;
+            }
+
+            return d;
         }
 
         private static Dictionary<string, object> MappingDict(Model.Mapping m)
@@ -790,6 +852,15 @@ namespace MigrationStudio.Core.Jobs
             }
 
             d["columns"] = (m.Columns ?? new List<ColumnMapping>()).Select(ColumnDict).ToList();
+            // 삭제 처리는 켰을 때만 쓴다 — 기존 작업 파일(v2)·골든 모양을 바꾸지 않기 위해
+            if (DeleteModes.IsMark(m.DeleteMode))
+            {
+                d["deleteMode"] = m.DeleteMode;
+                d["markColumn"] = m.MarkColumn;
+                d["markValue"] = m.MarkValue;
+                d["deleteApprovedAt"] = m.DeleteApprovedAt;
+            }
+
             return d;
         }
 

@@ -14,7 +14,7 @@ using MappingModel = MigrationStudio.Core.Model.Mapping;
 
 namespace MigrationStudio.Core.Adapters.Oracle.Engine
 {
-    public sealed class OracleSourceFactory : ISourceFactory
+    public sealed class OracleSourceFactory : ISourceFactory, ISourceClock
     {
         private readonly EndpointSpec _endpoint;
 
@@ -31,7 +31,7 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
             {
                 await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
                 OracleConnectionHelper.ApplySourceSession(connection, _endpoint.Schema, cancellationToken);
-                var sql = BuildSql(item, fetchSize, _endpoint.Schema);
+                var sql = BuildSql(item, fetchSize, _endpoint.Schema, range);
                 var command = OracleConnectionHelper.CreateCommand(connection, sql, cancellationToken);
                 command.CommandTimeout = 0;
                 command.InitialLONGFetchSize = -1;
@@ -53,7 +53,28 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
             return BuildSql(item, fetchSize, "");
         }
 
+        /// <summary>원본 DB 시각(시간대 없는 TIMESTAMP). 지연 창 상한 계산용 — 접속 하나를 열고 바로 닫는다.</summary>
+        public async Task<DateTime> NowAsync(CancellationToken cancellationToken)
+        {
+            OracleConnectionHelper.EnsureInBandBreak();
+            using (var connection = new OracleConnection(OracleConnectionHelper.BuildConnectionString(_endpoint.Connection)))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                using (var command = OracleConnectionHelper.CreateCommand(connection, "SELECT CAST(SYSTIMESTAMP AS TIMESTAMP(6)) FROM DUAL", cancellationToken))
+                {
+                    var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                    if (value is OracleTimeStamp stamp) return stamp.Value;
+                    return Convert.ToDateTime(value, CultureInfo.InvariantCulture);
+                }
+            }
+        }
+
         internal static string BuildSql(PlanItem item, int fetchSize, string sourceSchema)
+        {
+            return BuildSql(item, fetchSize, sourceSchema, null);
+        }
+
+        internal static string BuildSql(PlanItem item, int fetchSize, string sourceSchema, KeyRange range)
         {
             var options = new SourceSelectOptions { FetchSize = fetchSize, Workers = item.Ranges.Count > 1 ? item.Ranges.Count : 1 };
             var sql = SqlGenerator.BuildSourceSelect(item.Mapping, sourceSchema, item.SourceMetadata, item.TargetMetadata, options);
@@ -73,19 +94,24 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
             sql = sql.Insert(at, ",\n    " + prefix + item.Mapping.CheckpointColumn + " AS MIG_CP_HIDDEN");
             if (item.Ranges.Count > 1)
             {
-                var order = "\nORDER BY ";
-                var orderAt = sql.LastIndexOf(order, StringComparison.Ordinal);
-                var predicate = prefix + item.Mapping.CheckpointColumn + " >= :RANGE_FROM";
-                if (sql.IndexOf("\nWHERE ", StringComparison.Ordinal) >= 0)
-                {
-                    sql = sql.Replace("\nWHERE ", "\nWHERE " + predicate + "\n  AND ", StringComparison.Ordinal);
-                }
-                else
-                {
-                    sql = sql.Insert(orderAt, "\nWHERE " + predicate);
-                }
+                sql = AddPredicate(sql, prefix + item.Mapping.CheckpointColumn + " >= :RANGE_FROM");
+            }
+            if (range != null && range.Upper != null)
+            {
+                // 지연 창 상한: 원본 시각 − 지연 창까지만. 그 뒤 행은 다음 주기에(커밋이 늦은 행을 놓치지 않기 위해).
+                sql = AddPredicate(sql, prefix + item.Mapping.CheckpointColumn + " <= :UPPER");
             }
             return ExecutableSql(sql);
+        }
+
+        private static string AddPredicate(string sql, string predicate)
+        {
+            if (sql.IndexOf("\nWHERE ", StringComparison.Ordinal) >= 0)
+            {
+                return sql.Replace("\nWHERE ", "\nWHERE " + predicate + "\n  AND ", StringComparison.Ordinal);
+            }
+            var orderAt = sql.LastIndexOf("\nORDER BY ", StringComparison.Ordinal);
+            return sql.Insert(orderAt, "\nWHERE " + predicate);
         }
 
         private static string ExecutableSql(string sql)
@@ -115,6 +141,10 @@ namespace MigrationStudio.Core.Adapters.Oracle.Engine
             if (command.CommandText.IndexOf(":RANGE_FROM", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 AddBind(command, "RANGE_FROM", checkpointType, range.From);
+            }
+            if (command.CommandText.IndexOf(":UPPER", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                AddBind(command, "UPPER", checkpointType, range.Upper);
             }
         }
 

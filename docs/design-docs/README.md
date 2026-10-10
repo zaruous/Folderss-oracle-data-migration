@@ -482,7 +482,7 @@ CREATE TABLE MIG_CHECKPOINT (
 | 4 | 원본을 SQL로 | **결정** — 매핑의 원본 종류 `TABLE`·`SQL` 통합(작업 파일 v2). SQL 편집은 단계가 아닌 도구 창(UI-MIG-004) |
 | 5 | 병렬 작업자 사이 일관성: `AS OF SCN` 사용 여부(ORA-01555 위험) | 결정 필요 — POC는 선택 옵션, 기본 끔 |
 | 6 | SQL 편집기 구문 강조: TextBox(DB Helper와 동일) vs AvalonEdit(NuGet 추가) | 결정 필요 — POC는 강조 있음, 구현은 TextBox로 시작 |
-| 7 | CDC(LogMiner·GoldenGate) 범위 | 1차 제외, 화면 자리만 |
+| 7 | CDC(LogMiner·GoldenGate) 범위 | 1차 제외, 화면 자리만 — 구현 플랜·선택지·결정 질문은 [CDC-Plan.md](CDC-Plan.md) |
 
 ---
 

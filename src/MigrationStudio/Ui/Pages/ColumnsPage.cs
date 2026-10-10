@@ -141,10 +141,90 @@ namespace MigrationStudio.Ui.Pages
                 Kit.Field("병합 키", keys, false, null),
                 Kit.Field("체크포인트", cp, false, null),
                 Kit.Field("원본 조건 (WHERE)", where, false, "테이블/SQL 결과에 AND로 붙습니다"));
-            var panel = new Border { Padding = new Thickness(12), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Child = grid, Margin = new Thickness(0, 0, 0, 12) };
+            var stack = new StackPanel();
+            stack.Children.Add(grid);
+            stack.Children.Add(BuildDeleteRow(m, tgt));
+            var panel = new Border { Padding = new Thickness(12), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Child = stack, Margin = new Thickness(0, 0, 0, 12) };
             panel.SetResourceReference(Border.BackgroundProperty, Theme.PanelBackground);
             panel.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
             return panel;
+        }
+
+        /// <summary>
+        /// 원본에서 지운 행 처리(증분·CDC에서만 씀). 따라가지 않음이 기본, "대상에 삭제 표시"는 표시 열·값을 고르고 실행 화면에서 승인해야 표시한다.
+        /// 영구 삭제는 아직 없다(되돌릴 수 있는 표시만).
+        /// </summary>
+        private UIElement BuildDeleteRow(Mapping m, TableMetadata tgt)
+        {
+            var modes = new List<Kit.ComboOption>
+            {
+                new Kit.ComboOption { Value = DeleteModes.None, Label = DeleteModes.Label(DeleteModes.None) },
+                new Kit.ComboOption { Value = DeleteModes.Mark, Label = DeleteModes.Label(DeleteModes.Mark) }
+            };
+            var mark = DeleteModes.IsMark(m.DeleteMode);
+            var modeBox = Kit.CellComboBox(modes, mark ? DeleteModes.Mark : DeleteModes.None, v =>
+            {
+                if (ColumnsLogic.ChangeDeleteSetting(m, v, m.MarkColumn, m.MarkValue))
+                {
+                    _host.State.MarkChanged();
+                    Refresh();
+                }
+            });
+            var hint = "증분·CDC에서만. 원본에서 지운 행을 대상에 어떻게 반영할지 정합니다.";
+            if (!mark)
+            {
+                var only = Kit.FormGrid(4, Kit.Field("원본 삭제", modeBox, false, hint + " 따라가지 않으면 대상에 남고, 실행 후 검증·동기화 화면에 차이로 보입니다."));
+                only.Margin = new Thickness(0, 10, 0, 0);
+                return only;
+            }
+
+            var candidates = ColumnsLogic.MarkColumnCandidates(m, tgt).Select(c => new Kit.ComboOption { Value = c, Label = c }).ToList();
+            if (!string.IsNullOrEmpty(m.MarkColumn) && candidates.All(c => !string.Equals(c.Value, m.MarkColumn, StringComparison.OrdinalIgnoreCase)))
+            {
+                candidates.Insert(0, new Kit.ComboOption { Value = m.MarkColumn, Label = m.MarkColumn + " (쓸 수 없음 — 검증 참고)" });
+            }
+
+            var columnBox = Kit.CellComboBox(candidates, m.MarkColumn ?? "", v =>
+            {
+                if (ColumnsLogic.ChangeDeleteSetting(m, m.DeleteMode, v, m.MarkValue))
+                {
+                    _host.State.MarkChanged();
+                    Refresh();
+                }
+            });
+            var valueBox = new TextBox { FontFamily = Theme.Mono, Text = m.MarkValue ?? "" };
+            valueBox.LostFocus += (s, e) =>
+            {
+                if (ColumnsLogic.ChangeDeleteSetting(m, m.DeleteMode, m.MarkColumn, valueBox.Text))
+                {
+                    _host.State.MarkChanged();
+                    Refresh();
+                }
+            };
+            var approval = new StackPanel();
+            if (string.IsNullOrEmpty(m.DeleteApprovedAt))
+            {
+                var pending = new TextBlock { Text = "승인 전 — 대조만 하고 표시하지 않음", Foreground = Theme.Warning, TextWrapping = TextWrapping.Wrap };
+                approval.Children.Add(pending);
+            }
+            else
+            {
+                approval.Children.Add(Theme.Secondary("승인 " + m.DeleteApprovedAt));
+                approval.Children.Add(Kit.LinkButton("승인 취소", () =>
+                {
+                    m.DeleteApprovedAt = null;
+                    _host.State.MarkChanged();
+                    Refresh();
+                }));
+            }
+
+            var row = Kit.FormGrid(4,
+                Kit.Field("원본 삭제", modeBox, false, hint),
+                Kit.Field("표시 열", columnBox, false, "대상의 NULL 허용 열(NULL = 살아 있음). 원본에 다시 나타나면 NULL로 되돌립니다."),
+                Kit.Field("표시 값", valueBox, false, "예: Y, 1, SYSDATE(날짜 열)"),
+                Kit.Field("승인", approval, false, "Dry Run에서 표시될 행을 본 뒤 실행 화면에서 승인합니다. 설정을 바꾸면 승인이 지워집니다."));
+            row.Margin = new Thickness(0, 10, 0, 0);
+            return row;
         }
 
         private UIElement BuildColumnWorkspace(Mapping m, TableMetadata src, TableMetadata tgt)

@@ -1,0 +1,288 @@
+# CDC(변경 데이터 동기화) 구현 플랜
+
+| 항목 | 내용 |
+|---|---|
+| 상태 | **초안 — 일부 결정됨**(아래 "결정된 것" 참고, 남은 질문은 6장) |
+| 작성일 | 2026-10-08 (10-09 삭제 전파 정책 반영) |
+| 관련 | 기능 설계서 [README.md](README.md) 결정 사항 #7("CDC 1차 제외, 화면 자리만"), UI-MIG-001(이관 전략), UI-MIG-006(실행) |
+
+### 결정된 것 (2026-10-09)
+
+1. 기본 동작은 **추가·변경 반영**(폴링 + MERGE). 원본 SELECT 권한만으로 돌아가는 방식을 기본으로 한다.
+2. **삭제 전파는 옵션이며 기본 꺼짐.** 기능은 제공하되 위험 경고를 확실하게 보여 준다(3.3).
+3. 삭제 전파의 안전장치는 세 층: **삭제 전 보관 → 수행 내역 로그 → 되돌리기**(3.3). 로그만으로는 안전장치로 치지 않는다.
+   보관 위치(대상 DB 테이블 / 로컬 JSON 파일)는 삭제를 켤 때 **사용자가 직접 고른다.** 자동 선택·자동 대체는 두지 않는다.
+4. 로그 기반(LogMiner)은 DBA가 DB를 바꿔 주는 환경에서만 되는 방식이므로 별도 단계로 미룬다.
+5. 삭제 처리는 **매핑 단위** 설정이다(원본에 삭제 열이 있는지는 환경·테이블마다 다르다). 원본이 소프트 삭제(플래그)면 폴링이 UPDATE로 반영하므로 삭제 감지가 필요 없다(3.3).
+6. 상시 실행은 허용하되 "무기한"을 기본값으로 두지 않고, 끊김 복구·멈춤 감지·종료 조건을 안전장치로 둔다(3.7). Windows 서비스로는 만들지 않는다.
+7. 화면 라벨은 **"CDC (변경동기화)"**, 세그먼트 아래 힌트에 방식과 한계를 적는다(3.6).
+
+---
+
+## 1. 지금 상태 (코드 기준 사실)
+
+| 사실 | 위치 |
+|---|---|
+| `Strategy.Mode`(`FULL`·`INCREMENTAL`·`CDC`)와 `IncrementalBy`는 작업 파일에 저장·화면에 표시만 되고 **엔진·플래너 어디서도 읽지 않는다** | `Model/MigrationJob.cs`, `Jobs/JobFile.cs`, `Ui/Pages/ConnectionPage.cs` `RebuildStrategy()` |
+| 엔진이 아는 실행 모드는 `RunSpec.RunMode` = `DRY`·`EXECUTE`·`RESUME`뿐. "증분 이관"도 사실상 미구현이고, 있는 것은 **중단된 실행을 체크포인트 값부터 재개**하는 기능이다 | `Engine/RunPlanner.cs` `BuildAsync`, `Engine/MigrationEngine.cs` |
+| 원본 읽기 SQL은 `체크포인트열 > :LAST_ID ORDER BY 체크포인트열` 한 번 흐르고 끝난다(1회성 파이프라인). 반복 주기·상한(watermark 상한) 개념이 없다 | `Adapters/Oracle/Engine/OracleSourceFactory.cs` `BuildSql`, `Sql/SqlGenerator.cs` `BuildSourceSelect` |
+| 대상 쓰기는 INSERT·MERGE·TRUNCATE+INSERT·DELETE+INSERT. **키 하나를 지우는 경로(DELETE 전파)는 없다** | `Adapters/Oracle/Engine/OracleTargetFactory.cs` |
+| 원본 세션은 `SET TRANSACTION READ ONLY`. 원본에 DDL·DML을 하지 않는 것이 안전장치 원칙 | `OracleConnectionHelper.ApplySourceSession`, 설계서 7.3 |
+| 에이전트는 실행이 끝나면 `done`·`stopped`·`failed`로 종료 코드를 내고 `--idle-exit`초 뒤 나간다. "끝나지 않는 실행"을 전제하지 않는다 | `MigrationAgent/AgentHost.cs`, `Hosting/HostingContracts.cs` `AgentRunInfo.State` |
+| 동시 실행은 기본 1개(`AgentSettings.MaxConcurrent = 1`). CDC가 상시 돌면 다른 이관을 못 돌린다 | `Settings/SettingsModels.cs`, `Hosting/RunGuard.cs` |
+| `MIG_RUN.RUN_MODE VARCHAR2(10)` — 값 `CDC`는 들어가지만 상태 `running`이 몇 주 지속되는 행이 생긴다 | `OracleControlStore.cs` |
+| 변환식은 **원본 SELECT 안에서 Oracle이 계산**한다(설계서 4.4). 행을 SELECT로 읽지 않는 방식(LogMiner 등)은 변환식을 따로 처리해야 한다 | `Sql/SqlGenerator.WriteColumns` |
+
+결론: "CDC 모드 추가"는 플래그 하나를 켜는 일이 아니라, (1) 증분 이관 자체를 먼저 만들고, (2) 엔진을 1회성에서 반복 주기형으로 바꾸고, (3) 변경 원천을 하나 고르는 세 덩어리다.
+
+---
+
+## 2. 변경 원천 선택지와 허점
+
+"CDC"라는 말이 가리킬 수 있는 방식은 다섯 가지이고, 서로 요구 권한·감지 범위·공수가 전혀 다르다. **어느 것을 뜻하는지 먼저 정해야 한다.**
+
+| | A. 쿼리 폴링(수정시각·시퀀스 열) | B. `ORA_ROWSCN` 폴링 | C. 플래시백 버전 조회 | D. LogMiner | E. 원본 트리거 + 변경 로그 테이블 |
+|---|---|---|---|---|---|
+| 감지 | INSERT·UPDATE | INSERT·UPDATE | INSERT·UPDATE·**DELETE** | INSERT·UPDATE·**DELETE** | INSERT·UPDATE·**DELETE** |
+| 원본에 필요한 것 | 믿을 수 있는 수정시각/시퀀스 열 + 그 열의 인덱스 | 없음(단, 테이블이 `ROWDEPENDENCIES`가 아니면 블록 단위라 과다 감지) | 테이블 `FLASHBACK` 권한, 충분한 `UNDO_RETENTION` | ARCHIVELOG, 보조 로깅(최소 + 테이블별 PK), `EXECUTE ON DBMS_LOGMNR`·`LOGMINING`·`SELECT ANY TRANSACTION`·`V$` 뷰 권한. 멀티테넌트는 버전에 따라 CDB$ROOT 공용 사용자 필요 | **원본에 DDL(트리거·테이블)** — 읽기 전용 원칙 위반, 운영 DBA 승인 |
+| SQL 원본(JOIN) 매핑 | 가능(결과 열에 수정시각이 있으면) | 불가 | 불가 | 불가(테이블 단위) | 불가 |
+| 변환식 | 기존 SELECT 경로 그대로 | 그대로 | 그대로(`VERSIONS` 절만 추가) | 재조회 설계 필요(4장) | 재조회 설계 필요 |
+| 치명적 허점 | ① 수정시각이 안 바뀌는 UPDATE·DELETE 놓침 ② **커밋 지연**: 수정시각은 과거인데 커밋이 늦은 행을 워터마크가 지나쳐 놓침(지연 창으로 완화, 완전 해결 아님) ③ 원본 시계 기준이어야 함(클라이언트 시계 쓰면 틀림) | `ORA_ROWSCN`에 인덱스를 못 걸어 **매 주기 풀 스캔**. 블록 단위 SCN이면 한 행 바꿔도 블록 전체가 다시 옴 | ① `UNDO_RETENTION`(보통 15분~수시간)보다 오래 멈추면 **ORA-01555 → 전체 재동기화**뿐 ② 매 주기 풀 스캔 수준 비용 ③ DDL 후 버전 조회 불가 | ① 19c부터 `CONTINUOUS_MINE` 지원 종료 → 로그 파일 목록을 직접 관리 ② RMAN이 아카이브를 지우면 **빈틈 → 전체 재동기화** ③ 운영 DB에서 이 권한을 받는 것 자체가 어려움 ④ LOB·LONG·XMLTYPE 제한, DDL 처리 ⑤ `V$LOGMNR_CONTENTS`는 SQL 문자열이라 파싱 필요 | 원본 성능 영향, 트리거 누락 시 조용히 어긋남, 원본 변경 승인 |
+| 공수(상대) | 1 | 1 | 1.5 | 4~5 | 2 + 운영 협의 |
+
+GoldenGate는 라이선스 제품이라 연동 대상으로만 둘 수 있고(이 플러그인이 캡처를 하지 않음), 이 플랜에서는 뺀다.
+
+**F. 키·해시 비교(스냅샷 차이)** — 표에 없는 여섯째 방식. 원본·대상에서 `키, STANDARD_HASH(쓰기 열…)`을 키 순서로 읽어 병합 비교한다. 원본에만 있으면 INSERT, 대상에만 있으면 DELETE, 해시가 다르면 UPDATE. 권한은 SELECT뿐이고 수정시각 열도 필요 없으며 SQL 원본도 결과 열 기준이라 된다. 비용이 변경량이 아니라 **테이블 크기**에 비례하므로 분 단위 폴링에는 못 쓰고, 시간 단위·야간·수동 "지금 대조"로 돌리는 **삭제·누락 보정용**이다. 허점: 양쪽 값 표현(날짜 형식·숫자 정밀도·NLS)이 다르면 같은 데이터가 매번 UPDATE로 보인다 — 해시 전에 정규화가 필요하고 이 부분이 구현에서 가장 손이 간다.
+
+### 추천과 그 근거의 약점
+
+- **추천: A(쿼리 폴링)를 "변경 동기화" 기본으로, 삭제 감지는 F(키·해시 비교)를 1순위, C(플래시백)를 2순위 옵션으로 얹는다.** 모두 원본에 손대지 않고(읽기 전용 원칙 유지), 기존 SELECT·MERGE·체크포인트 경로를 그대로 쓴다. F를 C보다 앞에 두는 이유는 권한(SELECT만)과 복구 가능성(`UNDO_RETENTION` 의존 없음) 때문이다.
+- 약점: A는 엄밀히 CDC가 아니라 "증분 반복"이다. 로그 기반 CDC(D)를 기대했다면 이 추천은 기대에 못 미친다. D는 운영 DB 권한·아카이브 운영 정책에 묶여 **플러그인 혼자 완결할 수 없고**, 개발 공수의 반 이상이 Oracle 운영 조건 처리에 들어간다. 그래도 D가 필요하면 4장처럼 "키 캡처 전용"으로 좁혀야 현실적이다.
+- E(트리거)는 설계서 7.3 안전장치와 정면 충돌하므로, 사용자가 명시적으로 원하지 않는 한 선택지에서 제외할 것을 권한다.
+
+---
+
+## 3. 공통 구조 변경 (어느 원천을 고르든 필요)
+
+### 3.1 모델·작업 파일
+- `MigrationStrategy`에 추가(모두 선택 필드, `JobFile` 읽기는 `TryGetProperty`라 v2 유지 가능):
+  - `PollIntervalSeconds`(기본 60), `LagSeconds`(지연 창, 기본 300), `CdcSource`(`QUERY`·`LOGMINER`).
+  - 삭제 전파(전략 수준은 기본값, **매핑 수준에서 덮어씀**): `DeleteMode`(`NONE` 기본·`HARD`·`MARK`), `DeleteBackup`(`TABLE`·`FILE`, `HARD`면 필수·기본값 없음), `DeleteDetect`(`KEYDIFF`·`FLASHBACK`),
+  - `Mapping`에 추가: `DeleteMode`(null이면 전략 값), `MarkColumn`·`MarkValue`(`MARK`일 때 대상 열과 값 식), `DeleteCheckIntervalMinutes`(대조 주기, 기본 60), `DeleteMaxRatio`(한 번에 지울 수 있는 대상 비율 상한, 기본 0.1), `DeleteKeepDays`(보관 행 보존 일수, 기본 90).
+  - `IncrementalBy`의 뜻을 확정: 매핑의 `CheckpointColumn`이 곧 증분 기준이다. 전략 수준 `IncrementalBy`(PK·Timestamp·Sequence·SCN)는 **힌트/기본값**으로만 두거나 없앤다(둘 다 두면 어느 쪽이 맞는지 모호 — 현재 코드가 그 상태).
+- 작업 파일 예제(`JobSamples`)·YAML 쓰기(`JobFile` 748행 근처)·골든 테스트 영향 확인. 골든은 바꾸지 않고 새 필드는 기본값일 때 쓰지 않는다.
+
+### 3.2 엔진: 1회성 → 주기형
+- `RunSpec.RunMode`에 `SYNC`(가칭) 추가. `MigrationEngine.RunAsync`는 `SYNC`일 때 **주기 루프**: `[계획 갱신 → 작업별 1회 증분 실행 → 워터마크 저장 → 대기(PollInterval)]`를 `Stop`까지 반복.
+- 상태 추가: `waiting`(다음 주기 대기). `Pause`는 주기 경계에서 멈추고, `Stop`은 진행 중 배치를 커밋한 뒤 끝낸다(지금과 같은 경계 규칙).
+- 스냅샷(`RunSnapshot`)에 `Cycle`(회차), `LastCycleAt`, `NextCycleAt`, `LagSeconds`(원본 현재 시각 − 워터마크), 회차별 `Inserted/Updated/Deleted`.
+- 워터마크 = 기존 `CheckpointRecord`를 그대로 쓴다(`CP_COLUMN`·`CP_VALUE`, 상태 `syncing`). 대상 DB 저장소면 배치와 같은 트랜잭션이라 정확히 한 번, 로컬 파일이면 한 배치 재처리(MERGE라 결과 같음) — 지금 설계 6.5와 동일한 성질.
+- 병렬 작업자: 주기당 변경량이 작으므로 **SYNC에서는 작업자 1로 고정**(범위 분할은 첫 적재에만).
+
+### 3.3 쓰기 방식 제약
+- SYNC는 **MERGE만 허용**. INSERT ONLY는 두 번째 주기부터 중복 키, TRUNCATE/DELETE+INSERT는 매 주기 대상을 비운다. 검증에서 ERROR.
+- DELETE 전파용 `ITargetSession.DeleteKeysAsync(item, keys)` 추가(`OracleTargetFactory`에 `DELETE … WHERE 키 = :k` 배열 바인딩). `DeleteMode = MARK`면 삭제 대신 `MarkColumn = MarkValue` UPDATE(되돌릴 수 있으므로 보관 불필요).
+
+#### 원본의 삭제 방식별 설정 (매핑 단위)
+
+| 원본이 하는 일 | 매핑 설정 | 플러그인 동작 |
+|---|---|---|
+| 플래그만 바꿈(소프트 삭제) | 플래그 열을 컬럼 매핑에 포함 | 폴링이 UPDATE로 반영. **삭제 감지 불필요.** 단 매핑 `Where`가 플래그로 거르면(`DEL_YN = 'N'`) 삭제된 행이 폴링에서 사라져 대상에 영원히 남는다 → C23 WARN |
+| 행을 지움, 대상도 지움 | `DeleteMode = HARD` + `DeleteBackup` | 키·해시 대조 → 아래 규칙 전부 → `DeleteKeysAsync` |
+| 행을 지움, 대상은 표시만 | `DeleteMode = MARK` + `MarkColumn`·`MarkValue` | 키·해시 대조 → 대상 UPDATE. 상한·Dry Run 승인은 같이 적용, 보관은 생략 |
+| 모름 / 안 따라감 | `NONE`(기본) | 유령 행 수만 표시(3.6) |
+
+#### 삭제 전파 규칙 (결정됨)
+
+| 항목 | 규칙 |
+|---|---|
+| 기본값 | 꺼짐(`NONE`). 작업을 새로 만들 때 한 번 "삭제도 따라갈지"를 묻는다 — 전체 적재 직후 켜면 첫 대조에서 지울 것이 없어 **나중에 켜는 것보다 안전**하다 |
+| 켜는 방법 | 실행 버튼 옆 ▾ 옵션 대화상자(`GitForceConfirmDialog` 방식). 기본 꺼짐 + 경고 문구 + 확인 체크. 대상이 운영(빨강)이면 추가 경고 |
+| 켤 수 있는 매핑 | **조건(`Where`) 없는 1:1 매핑, 그 대상 테이블을 쓰는 매핑이 하나뿐일 때만.** 조건이 있거나 같은 대상에 매핑이 둘이면(예제의 `TB_MEMBER`) "대상에만 있는 행"이 삭제가 아니라 조건 밖·다른 매핑의 행일 수 있어 ERROR(C20). 그 경우 `MARK`만 허용 |
+| 첫 실행 | 켠 뒤 첫 대조는 **무조건 Dry Run**: 지울 행 수와 표본 키를 보여 주고 사용자가 승인한 뒤에만 실제 삭제. 오래 꺼 두었다가 켤 때 쌓인 차이를 한 번에 지우는 것이 가장 위험한 순간이다 |
+| 건수 상한 | 지울 행이 대상의 `DeleteMaxRatio`를 넘으면 삭제하지 않고 멈춘다. 매핑 조건·다중 매핑·원본 접속 오류(빈 원본)를 의심하라고 안내 |
+| 삭제 전 보관 (1층) | 지울 행의 **전체 값**을 먼저 복사한다. 보관 위치는 삭제를 켤 때 **사용자가 반드시 고른다**(`DeleteBackup` = `TABLE` 또는 `FILE`, "없음"은 선택지에 없음, 자동 선택·자동 대체 없음): `TABLE` = 대상 DB `MIG_DELETED_<테이블>`(오류 테이블 `ERR$_`와 같은 명명·생성 규칙, `RUN_ID`·`DELETED_AT` 열 추가) / `FILE` = 로컬 JSON(`DataDirectory\deleted\<작업>\<RUN_ID>.json`, 경로를 대화상자에 표시). 고르는 시점에 즉시 검사해(테이블 생성 권한·파일 쓰기 가능) 안 되면 삭제 옵션이 켜지지 않는다. 실행 때 고른 위치가 안 되면 **다른 쪽으로 넘어가지 않고 멈춘다**. `TABLE`은 **복사 → 삭제 → 커밋을 같은 트랜잭션**으로 묶어 "보관 없이 지워진 행"이 생기지 않게 한다. `FILE`은 파일 쓰기·flush 성공 뒤에만 삭제를 커밋한다. 복사 실패 = 삭제 안 함 |
+| 수행 내역 로그 (2층) | `RUN_ID`, 매핑, Dry Run 건수, 승인 시각, 실제 삭제 건수, 삭제 키 목록 파일 경로를 실행 로그와 `MIG_RUN_TASK`에 남긴다. 삭제 기록은 `AgentSettings.LogDays` 자동 정리 **대상에서 뺀다**(별도 `DeleteKeepDays`) |
+| 되돌리기 (3층) | 실행 화면 체크포인트 카드 옆에 "삭제 되돌리기…": 보관 테이블·파일에서 `RUN_ID`를 골라 대상에 다시 INSERT. 수동 SQL에 맡기면 사고 때 실수가 난다 |
+| 민감 정보 | 보관 행에 개인정보가 들어간다. `FILE`을 고르면 대화상자에서 "이 PC에 평문으로 남고 다른 PC에서는 되돌릴 수 없다"를 경고하고, 보존 일수 뒤 정리한다. 파일 경로를 실행 로그에 남겨 어디 있는지 알 수 있게 한다 |
+
+### 3.4 에이전트·호스트
+- `AgentHost`: `SYNC`는 `done`이 없다. 종료는 `stopped`(사용자) 또는 `failed`만. `--idle-exit`는 적용하지 않는다.
+- `AgentRunInfo.State`에 `syncing` 추가 → 다시 붙기 목록·`RunPage` 배지·`MIG_RUN.STATUS` 매핑.
+- **위험**: `OnHostExit = CONTINUE`(기본)이면 Folderss를 닫아도 CDC 에이전트가 무기한 돈다. 사용자가 잊은 에이전트가 운영 대상에 계속 쓴다. 대책: SYNC 시작 확인 창에 "창을 닫아도 계속 동기화합니다" 명시 + 설정 `Agent.MaxConcurrent`를 SYNC 1 + 일반 1로 분리하거나 SYNC 중에는 다른 실행을 막는다는 안내.
+- `RunGuard`: 같은 작업 이름의 SYNC가 돌면 같은 작업의 EXECUTE를 막는다(워터마크 충돌).
+
+### 3.5 검증(실행 전 C14~)
+| 코드(가칭) | 내용 | 수준 |
+|---|---|---|
+| C14 | SYNC인데 쓰기 방식이 MERGE가 아님 / 병합 키 없음 | ERROR |
+| C15 | 증분 기준 열 없음·형식이 DATE/TIMESTAMP/NUMBER 아님·NULL 허용 열 | ERROR / WARN(NULL 허용) |
+| C16 | 증분 기준 열에 인덱스 없음(매 주기 풀 스캔) | WARN |
+| C17 | 원본·클라이언트 시계 차(원본 `SYSTIMESTAMP`와 비교, 정보성) | INFO |
+| C18 | `DeleteDetect = FLASHBACK`: `FLASHBACK` 권한, `UNDO_RETENTION` 값, `DeleteCheckInterval < UNDO_RETENTION/2` | ERROR / WARN |
+| C19 | LogMiner 선택 시: ARCHIVELOG, 보조 로깅, 권한, 컨테이너 종류 | ERROR |
+| C20 | `DeleteMode = HARD`인데 매핑에 `Where`가 있거나 같은 대상 테이블을 쓰는 매핑이 둘 이상 | ERROR |
+| C21 | `DeleteMode = HARD`: `DeleteBackup`이 비었거나, 고른 위치가 지금 안 됨(`TABLE`: 생성·INSERT 권한 없음 / `FILE`: 경로 쓰기 불가) — 매 실행 전 다시 검사, 대체 없음 | ERROR |
+| C22 | `DeleteDetect = KEYDIFF`: 해시 대상 열에 정규화 불가 형식(LOB·TIMESTAMP WITH TIME ZONE 등) | WARN |
+| C23 | 매핑 `Where`가 원본 삭제 플래그 열(이름이 `DEL_YN`·`DELETED`·`IS_DELETED`·`DELETED_AT` 류이거나 사용자가 지정)로 거름 — 소프트 삭제된 행이 폴링에서 사라짐 | WARN |
+| C24 | SYNC 상시 실행인데 원본·대상 접속이 "비밀번호 저장 안 함" — 재시작 때 사람이 필요 | WARN(종료 시각 없으면 ERROR) |
+
+### 3.6 화면
+- `ConnectionPage.RebuildStrategy()`: 세그먼트 라벨 **"CDC (변경동기화)"**(결정됨). 선택 시 안내문 대신 폴링 주기·지연 창·종료 조건·삭제 기본값·변경 원천 필드. 힌트 한 줄은 방식과 한계를 적는다: "수정시각 열 기준으로 주기마다 추가·변경을 반영합니다. 삭제는 매핑별 옵션에서 켭니다."
+- `RunPage`: 회차·지연·다음 주기 카운트다운, "동기화 중지" 버튼(Stop과 같음), 체크포인트 카드에 워터마크 표시.
+- **유령 행 표시(삭제 꺼짐일 때 필수)**: 실행 화면과 실행 후 검증(P01 행 수 비교)에 "삭제 전파 꺼짐 · 원본 n / 대상 m (차이 k)"를 항상 보이고 차이가 늘면 WARN. 삭제를 끈 것이 조용히 묻히는 것이 가장 큰 위험이다.
+- 오래 멈췄다가 다시 시작할 때(워터마크가 지연 창의 N배 이상 뒤처짐) "지난 실행 이후 x시간 분량을 한 번에 반영합니다" 안내.
+- `README.md` 한계 항목("CDC 미지원") 갱신, 설계서 결정 사항 #7 갱신.
+
+### 3.7 상시 실행 안전장치 (결정됨: 허용하되 무기한은 기본값 아님)
+
+삭제 안전장치가 "데이터를 망치지 않기"라면, 이쪽은 "조용히 멈추거나 조용히 어긋나지 않기"다.
+
+| 항목 | 규칙 |
+|---|---|
+| 접속 수명 | 주기마다 원본·대상 접속을 새로 연다(세션을 붙들면 유휴 세션 정리·방화벽에 끊긴다). 주기 안에서는 지금처럼 유지 |
+| 끊김 복구 | 접속·읽기 실패는 기존 `RetryDelays`를 확장한 지수 백오프(최대 간격·최대 횟수 설정). 재시도 중 워터마크는 그대로. 상한을 넘으면 `failed`로 멈추고 마지막 오류를 남긴다. "일시 오류면 영원히 재시도"는 두지 않는다 |
+| 종료 조건 | `MaxRunHours` 또는 `StopAt`(전환일 시각) 중 하나를 고르게 하고, 기본값은 24시간. "무기한"은 ▾ 대화상자에서 명시적으로 골라야 하고 경고를 보인다 |
+| 멈춤 감지 | 스냅샷·`AgentRunInfo`에 `LastCycleAt`. 다시 붙기 목록과 실행 화면에 "마지막 주기 n분 전" 표시, 지연이 `PollInterval × 3`을 넘으면 WARN 배지. 에이전트 프로세스가 없는데 기록이 `syncing`이면 `crashed`로 표시(지금 `process-exit` 기록 재사용) |
+| 비밀번호 | "저장하지 않음" 접속은 재시작 때 사람이 필요하므로 C24. 상시 실행은 DPAPI 저장 접속을 전제한다 |
+| 자동 재시작 없음 | 절전·재부팅·로그아웃이면 멈추고 스스로 다시 뜨지 않는다. **Windows 서비스·작업 스케줄러 등록은 만들지 않는다**(다른 제품 범위). 시작 확인 창에 이 한계와 "상시 운영이면 꺼지지 않는 PC에서"를 적는다 |
+| 동시 실행 | 동기화 전용 자리 1개를 `MaxConcurrent`와 별도로 둔다. 같은 작업의 EXECUTE/RESUME은 동기화가 도는 동안 막는다(`RunGuard`) |
+| 로그 증가 | 주기당 로그는 변경이 있을 때만 상세, 없으면 한 줄. `LogDays` 정리는 그대로, 삭제 기록만 예외(3.3) |
+| 운영 대상 | `OnHostExit = CONTINUE`(기본)이면 Folderss를 닫아도 운영 대상에 계속 쓴다. 시작 확인 창 문구에 명시 |
+
+### 3.8 접속 능력 감지 (어느 방식이 되는 계정인지는 환경마다 다르다)
+
+방식을 미리 고정하지 않고, 접속 시험 때 **읽기 전용 조회만으로** 계정이 할 수 있는 것을 검사해 되는 선택지만 연다. 결과는 접속 프로필에 `Capabilities`로 저장하고 전략 화면에서 안 되는 방식은 비활성화 + 이유 툴팁.
+
+| 검사 | 조회 | 열리는 것 | 조회가 실패하면 |
+|---|---|---|---|
+| 원본 테이블 `SELECT` | 기존 메타데이터 읽기 | 폴링, 키·해시 대조 | 지금과 같이 접속 오류 |
+| 테이블별 `FLASHBACK` | `USER_TAB_PRIVS`·`ALL_TAB_PRIVS`, `SESSION_PRIVS`의 `FLASHBACK ANY TABLE` | 플래시백 삭제 감지 | 모름 → 닫음 |
+| `undo_retention` | `V$PARAMETER` | 플래시백 대조 주기 상한 계산 | 모름 → 보수적 기본값(900초)으로 계산하고 표시 |
+| LogMiner 권한 | `SESSION_PRIVS`의 `LOGMINING`·`SELECT ANY TRANSACTION`, `ALL_TAB_PRIVS`의 `DBMS_LOGMNR` EXECUTE | LogMiner **후보** | 모름 → 닫음 |
+| LogMiner DB 설정 | `V$DATABASE.LOG_MODE`·`SUPPLEMENTAL_LOG_DATA_MIN`, 테이블별 `ALL_LOG_GROUPS` | LogMiner **사용 가능**. 빠진 항목은 필요한 DDL 문을 보여 줌(실행하지 않음) | 모름 → "권한은 있으나 설정 확인 불가, DBA에게 확인" |
+| 대상 `CREATE TABLE`·DML | 기존 `CheckControlStoreAsync` + 보관 테이블 항목 | 제어 테이블·`MIG_DELETED_*` | 기존 규칙(로컬 파일) |
+
+규칙:
+- **"모름"과 "불가"를 구분한다.** `V$` 뷰가 안 보여(`ORA-00942`) 검사가 실패한 것은 불가가 아니다. 모름이면 그 방식을 닫되 "DBA에게 확인" 문구를 붙인다. 모름을 불가로 보이면 실제로 되는 환경에서 사용자가 포기한다.
+- **저장한 결과를 믿지 않는다.** 권한은 바뀐다. 실행 전 검증(C18·C19·C21)에서 다시 확인하고, 실행 중 `ORA-01031`(권한 부족)은 재시도하지 않고 멈춘다.
+- **"권한 있음"과 "지금 쓸 수 있음"을 따로 보인다.** `DBMS_LOGMNR` 실행 권한은 있는데 보조 로깅이 꺼진 경우가 흔하다.
+- **검사는 원본에 아무것도 쓰지 않는다.** `START_LOGMNR`를 실제로 호출해 보지 않는다(세션 자원과 권한 오류 로그를 남긴다).
+- 단계: P8-c에서 폴링·플래시백·대상 항목까지, LogMiner 항목은 P8-e 전까지 "모름"으로만 표시.
+
+---
+
+## 4. 원천별 상세
+
+### 4.1 A. 쿼리 폴링 (1단계)
+주기 1회 알고리즘(작업 하나 기준):
+1. 원본에서 `SELECT SYSTIMESTAMP FROM DUAL` → `Upper = 원본현재시각 − LagSeconds`(클라이언트 시계는 쓰지 않는다).
+2. `WHERE 열 > :LOWER AND 열 <= :UPPER ORDER BY 열` — `LOWER = 워터마크 − LagSeconds`(겹쳐 읽기). 겹친 행은 MERGE라 결과가 같다.
+3. 배치마다 MERGE + 체크포인트(워터마크 = 읽은 마지막 값, 단 `Upper`를 넘지 않음).
+4. 변경 0건이면 워터마크를 `Upper`로 올린다(그래야 지연 계산이 맞는다).
+
+허점을 그대로 적어 둔다:
+- 수정시각을 안 바꾸는 UPDATE, 물리 DELETE는 **영원히 못 본다**. 삭제가 필요하면 `SOFT_COLUMN`(원본에 삭제 플래그가 있을 때) 또는 4.2.
+- 지연 창은 "보통의 커밋 지연"만 덮는다. 긴 트랜잭션(배치 작업이 30분 열어 두는 경우)은 창을 그만큼 키워야 하고, 그만큼 매 주기 재읽기 비용이 는다. 창 크기는 설정이지 해법이 아니다.
+- `DATE` 열은 초 단위라 같은 초에 들어온 행을 경계에서 나눌 수 없다 → `>` 대신 `>=`로 겹쳐 읽는 것이 필수(2번의 LOWER가 그 역할).
+- SQL 원본(JOIN)은 "조인된 어느 쪽이 바뀌어도 결과 행이 바뀐다"를 수정시각 하나로 표현할 수 없다. SQL 원본은 `GREATEST(a.UPD, b.UPD) AS UPD_AT` 같은 결과 열을 사용자가 만들었을 때만 허용하고 WARN을 낸다.
+
+### 4.2 F. 키·해시 비교 (삭제 감지 1순위)
+대조 1회(작업 하나 기준):
+1. 원본: 기존 `BuildSourceSelect` 결과 열(변환식 적용 뒤)을 `키 ORDER BY` 로 읽되, 값 대신 `키, STANDARD_HASH(정규화(열1) || '|' || 정규화(열2) …)`만 가져온다. 대상: 같은 열을 같은 정규화로 해시. 정규화 = 날짜 `TO_CHAR(…, 'YYYYMMDDHH24MISSFF6')`, 숫자 `TO_CHAR(…, 'TM9')`, 문자 `NVL(…, '')`.
+2. 양쪽을 키 순서로 스트리밍 병합: 대상에만 있는 키 → 삭제 후보, 해시 다름 → MERGE 재적용, 원본에만 있음 → MERGE.
+3. 큰 테이블은 키 범위를 나눠(기존 `RangesAsync` 재사용) 범위별 집계 해시(`SUM(ORA_HASH(...))`)를 먼저 비교하고 다른 범위만 행 단위로 내려간다.
+4. 삭제 후보는 3.3 규칙(상한·Dry Run·보관)을 거쳐 `DeleteKeysAsync`.
+
+허점: 대조 중 바뀐 행은 다음 대조에서 잡힌다(즉시성 없음). 비용은 원본 부하로 그대로 간다 — 테이블별 대조 주기 설정이 필요하다. 정규화가 틀리면 매번 전체 UPDATE가 나므로 Oracle IT 테스트로 형식별 "같은 데이터 = 같은 해시"를 고정한다.
+
+### 4.2b C. 플래시백 버전 조회 (삭제 감지 2순위)
+- 주기마다 `SELECT 키열, VERSIONS_OPERATION, VERSIONS_ENDSCN FROM 원본 VERSIONS BETWEEN SCN :LAST AND :NOW WHERE VERSIONS_OPERATION = 'D'`로 삭제 키만 뽑아 대상에서 지운다. 워터마크는 SCN(`DBMS_FLASHBACK.GET_SYSTEM_CHANGE_NUMBER` 또는 `V$DATABASE.CURRENT_SCN`, 권한 없으면 `TIMESTAMP_TO_SCN`).
+- INSERT·UPDATE까지 이 경로로 가져올 수도 있으나(수정시각 열이 없는 테이블에 유효), 매 주기 비용이 풀 스캔급이라 **삭제 감지 전용**으로 쓰는 것을 전제한다.
+- 멈춘 시간이 `UNDO_RETENTION`을 넘으면 ORA-01555. 이때 할 수 있는 것은 "전체 재적재(TRUNCATE+INSERT 또는 MERGE 전체)"뿐이고, 사용자에게 선택 창을 띄운다(자동 재적재 금지 — 운영 대상이면 위험).
+
+### 4.3 D. LogMiner (요구가 분명할 때만, 별도 단계)
+현실적인 범위는 **"어느 키가 바뀌었나"만 LogMiner로 캡처하고, 값은 기존 SELECT 경로로 재조회**하는 하이브리드다. 이유: 변환식·형식 변환·NULL 처리를 모두 Oracle SELECT에 맡긴 현재 구조를 유지할 수 있고, `SQL_REDO` 문자열에서 전체 값을 파싱하지 않아도 된다.
+
+주기 1회:
+1. `V$DATABASE.CURRENT_SCN`으로 상한. `V$ARCHIVED_LOG`·`V$LOG`에서 `[워터마크 SCN, 상한]`을 덮는 로그 파일 목록을 구해 `DBMS_LOGMNR.ADD_LOGFILE`(19c는 `CONTINUOUS_MINE`이 없으므로 필수).
+2. `START_LOGMNR(STARTSCN, ENDSCN, OPTIONS = DICT_FROM_ONLINE_CATALOG + COMMITTED_DATA_ONLY)`.
+3. `V$LOGMNR_CONTENTS`에서 `SEG_OWNER`·`TABLE_NAME`이 매핑 대상인 행의 `OPERATION`·`ROW_ID`·`SQL_REDO`를 읽는다. INSERT·UPDATE는 `ROW_ID`로 원본을 재조회(`WHERE ROWID IN (...)`), DELETE는 `SQL_REDO`의 WHERE절에서 PK 값만 파싱(테이블별 PK 보조 로깅이 켜져 있어야 PK가 WHERE절에 나온다).
+4. `END_LOGMNR`, 워터마크 = 상한 SCN.
+
+이 길의 허점:
+- 운영 DB에서 `LOGMINING`·`SELECT ANY TRANSACTION`·`V$` 권한과 보조 로깅 DDL을 받아야 한다. 플러그인은 요구 사항을 **검사(C19)하고 DDL 문을 보여 줄 뿐 실행하지 않는다**(원본 읽기 전용 원칙).
+- 아카이브 로그가 지워지면 빈틈. 감지는 되지만(필요 로그가 목록에 없음) 복구는 전체 재적재뿐.
+- ROWID 재조회는 "지금 값"을 가져오므로 한 주기 안의 중간 상태는 잃는다(동기화 목적엔 괜찮지만 감사 로그 목적이면 부적합). 테이블 `MOVE`·파티션 이동으로 ROWID가 바뀌면 재조회가 빈다 → PK 파싱으로 대체해야 하고, 그러면 결국 `SQL_REDO` 파서가 필요하다.
+- 멀티테넌트에서 PDB 접속만으로 마이닝이 안 되는 버전이 있다(CDB$ROOT 공용 사용자 필요). 접속 프로필 하나로 끝나지 않는다.
+- `V$LOGMNR_CONTENTS` 조회는 매 주기 지정 구간의 redo를 전부 읽는다. 변경이 많은 DB에서 주기를 짧게 두면 원본에 부담.
+- 통합 시험: 현재 `ORACLE_IT_DSN` 컨테이너(gvenzl 류 XE)는 NOARCHIVELOG가 기본이라 **시험 환경부터 만들어야** 한다(SYSDBA로 ARCHIVELOG 전환·보조 로깅).
+
+---
+
+## 5. 단계별 작업 분해와 완료 조건
+
+각 단계는 독립 PR 하나로, 완료 조건은 자동 시험으로 판정한다.
+
+### P8-a 증분 이관을 진짜로 만들기 (선행, 원천 무관) — **구현됨 (2026-10-09)**
+- `RunMode = INCREMENTAL`(1회성): 워터마크 이후만 읽고 끝에 워터마크 저장. 지금의 `RESUME`과 다른 점은 "완료된 작업도 다시 돌릴 수 있고, 체크포인트가 `done`이어도 그 값부터 읽는다".
+- `Strategy.Mode`가 엔진에 실제로 반영되게 연결(`RunLauncher`/`RunPlanner`), 모드 `INCREMENTAL`인데 `CheckpointColumn` 없는 매핑은 검증 ERROR.
+- 완료 조건: `MigrationEngineTests`에 "1차 실행 후 원본에 3행 추가·2행 수정 → 증분 실행이 그 5행만 MERGE하고 워터마크가 최댓값으로 바뀐다" (`MemoryFakes` 사용). 기존 테스트 전부 통과.
+- 구현 메모: 새 `RunMode` 값을 만들지 않고 `Strategy.Mode = INCREMENTAL` + 기존 `EXECUTE`/`DRY`로 동작한다(플래너 `RunPlanner.BuildAsync`가 저장소의 마지막 키를 `ResumeFrom`으로, `BaseRows = 0`). 병렬 범위 기록(`id#n`)만 있으면 가장 작은 값을 워터마크로 쓴다(`RunPlanner.Watermark`). 워터마크 이후 행 수는 `ISourceProbe.RangesAsync(item, 1, 워터마크)`로 센다(인터페이스 변경 없음). 로컬 파일 저장소의 첫 배치 MERGE 흡수는 `RESUME`뿐 아니라 `ResumeFrom`이 있는 모든 실행에 적용. 검증은 매핑 그룹 `증분 기준`(체크포인트 열 없음·TRUNCATE+INSERT = ERROR, 숫자·날짜 아닌 열 = WARN, INSERT ONLY = INFO). 시험: `tests/MigrationStudio.Tests/Engine/IncrementalRunTests.cs`, `ValidationEngineTests.RunPre_incremental_*`, `RunLogicTests.Mode_description_*`.
+
+### P8-b 주기 루프 + 상태 + 에이전트 + 상시 실행 안전장치 — **구현됨 (2026-10-09, 일부 항목 이월)**
+- 3.2·3.4·3.7의 엔진·에이전트 변경. UI는 최소(실행 방식 세그먼트 "CDC (변경동기화)", RunPage 회차·지연·마지막 주기 표시, 종료 조건 입력).
+- 구현 메모: `RunSpec.RunMode = SYNC`(`RunModes.Sync`). 전략이 CDC면 `RunLauncher.ResolveRunMode`가 실행·재개를 SYNC로 바꾸고 Dry Run은 워터마크 이후 1회로 둔다. 엔진 `RunSyncAsync`: [한 번 돌기 → `task.Checkpoint ?? ResumeFrom`을 다음 워터마크로 → 대기(1초 조각, 일시 정지·중지 즉시 반영)] 반복. 끝은 stopped(사용자) · done(`MaxRunHours`, 기본 24, 0 = 무기한) · failed(데이터·설정 오류 즉시, 일시 오류는 주기×2ⁿ 백오프(최대 30분)로 5회까지). 스냅숏 `RunSnapshot.Sync`(주기 번호·phase·마지막/다음 주기 시각·누적 삽입·갱신·거부·연속 오류 수). 주기 중에는 ScopeTotal을 세지 않는다(매 주기 COUNT 금지). `MIG_RUN_TASK`는 첫 주기에만 INSERT. 에이전트 기록 파일에 `cycle`·`lastCycleAt`(붙지 않아도 마지막 주기 시각 확인용). 작업 파일에 `pollIntervalSeconds`·`maxRunHours`(기본값이면 쓰지 않음). 시작 관문 `ConfirmSync`(주기·종료 조건·창 닫을 때 동작·자동 재시작 없음 안내 + 확인 체크). 검증 `증분 기준`이 CDC에도 적용되고 INSERT ONLY는 WARN.
+- 이월(의도적으로 뺀 것): 엔진 상태 `waiting`은 추가하지 않고 `running` + `Sync.Phase = waiting`으로 표현(실행 상태 열거·다시 붙기 화면을 바꾸지 않기 위해). `AgentRunInfo.State = syncing`도 같은 이유로 `running` 유지. `StopAt`(종료 시각)은 `MaxRunHours`만 먼저. 같은 작업의 EXECUTE 차단(`RunGuard`)·동기화 전용 동시 실행 자리·비밀번호 미저장 경고(C24)·다시 붙기 목록의 "마지막 주기 n분 전" 표시는 P8-c와 함께.
+- 시험: `tests/MigrationStudio.Tests/Engine/SyncRunTests.cs`(주기 반복·워터마크·누적 합계, 두 번째 실행이 워터마크에서 이어 감, 일시 오류 백오프 1분→2분 뒤 성공, 5회 연속 실패 → failed, 설정 오류 즉시 failed, 최대 실행 시간 → done, 주기 사이 일시 정지·재개, 플래너 작업자 1), `AgentRunFilesTests`, `RunLogicTests.Sync_*`, `CoreUnitTests.JobFile_sync_*`, `ValidationEngineTests.RunPre_cdc_*`.
+- 완료 조건: `MigrationEngineTests` — 가짜 시계로 2주기 돌려 각 주기가 그 사이 변경만 쓰는지, `Stop`이 배치 경계에서 멈추고 워터마크가 보존되는지, 가짜 원본이 2회 연속 실패 뒤 성공하면 워터마크 변화 없이 이어 가는지, 재시도 상한 초과 시 `failed`인지, `StopAt` 도달 시 `done`으로 끝나는지. `AgentIntegrationTests` — SYNC 상태로 다시 붙기, 호스트 종료 후에도 살아 있음, `LastCycleAt`이 기록에 남음.
+
+### P8-c 쿼리 폴링 완성(지연 창·원본 시계·검증 C14~C17·접속 능력 감지) — **구현됨 (2026-10-09, 접속 능력 감지는 P8-d로 이월)**
+- 구현 메모: `Strategy.LagSeconds`(기본 300, 기본값이면 파일에 안 씀). 전략이 INCREMENTAL·CDC이고 체크포인트 열이 날짜·시각이면 엔진이 작업 시작 때 `ISourceClock.NowAsync`(Oracle: `CAST(SYSTIMESTAMP AS TIMESTAMP(6))`)로 원본 시각을 읽어 상한 = 원본 시각 − 지연 창(`KeyRange.Upper`, SQL `cp <= :UPPER`)을 건다. 상한은 워터마크보다 뒤로 가지 않는다. 작업이 끝나면 워터마크 = 상한(변경이 없던 주기에도 전진, 같은 초 경계 중복·누락 없음). 숫자 키는 창 없음(검증에서 안내). 원본 시각을 못 읽으면 창 없이 돌고 한 번 경고. 4.1에서 적었던 "LOWER = 워터마크 − 지연 창(겹쳐 읽기)"은 쓰지 않았다 — 상한을 워터마크로 쓰면 겹쳐 읽을 필요가 없고 MERGE 재적용도 사라진다.
+- 검증: `증분 기준`에 SQL 원본 WARN(조인 테이블 변경 반영 조건)·지연 창 표시·숫자 키 안내. 새 항목 `동기화 접속`(CDC + 비밀번호 저장 안 함 → WARN, 무기한이면 ERROR = C24)·`원본 시계`(원본 SYSTIMESTAMP와 이 PC 시계 차, 지연 창보다 크면 WARN = C17). C16(인덱스 없음)은 메타데이터에 인덱스 정보가 없어 이월.
+- 다시 붙기 안내에 "동기화 주기 n · 마지막 m분 전", 1시간 넘으면 "멈췄을 수 있음". 같은 작업의 중복 실행 차단은 기존 `RunGuard`가 이미 한다(`AlreadyRunningException`).
+- 이월: 3.8 접속 능력 감지는 소비자(삭제 옵션 게이트·플래시백·LogMiner)가 생기는 P8-d에서 함께 만든다.
+- 시험: `IncrementalRunTests.Lag_window_*`(지연 창 없이는 지연 커밋 행이 빠지고, 5분 창에서는 들어오며, 시계가 뒤로 가도 워터마크가 안 내려감), `Oracle_source_sql_binds_upper_bound_*`, `ValidationEngineTests.RunPre_sync_checks_*`, `RunReattachLogicTests.Notice_shows_last_sync_cycle_*`, `CoreUnitTests.JobFile_sync_*`.
+- 4.1 전부, `OracleSourceFactory`에 `:UPPER` 바인딩, SQL 원본 WARN. 3.8 접속 능력 감지(`ConnectionTestResult.Capabilities`, 전략 화면 비활성화 + 툴팁).
+- 완료 조건: `SqlGenerator` 골든 외 신규 테스트로 생성 SQL 확인(`> :LOWER AND <= :UPPER`), 커밋 지연 시나리오(가짜 원본에서 "수정시각은 과거·가시화는 다음 주기"인 행이 지연 창 안에서 잡힘), `ValidationEngineTests`에 C14~C17. 능력 감지: 가짜 어댑터가 `ORA-00942`를 내면 결과가 "모름"이고 "불가"가 아님, 권한 있음 + 설정 부족이 따로 표시됨. Oracle IT: `DATE` 경계 같은 초 행 누락 없음, `MIG_IT_RO`(SELECT만) 계정에서 폴링·대조만 열리고 나머지는 모름/닫힘.
+
+### P8-d 삭제 전파 (옵션, 기본 꺼짐) — **①② 구현됨 (2026-10-09), ③ HARD·④ FLASHBACK은 남음**
+- 구현 메모(①②):
+  - 모델: 매핑 단위만(`Mapping.DeleteMode` = `NONE`·`MARK`, `MarkColumn`, `MarkValue`, `DeleteApprovedAt`). 3.1에 적은 "전략 수준 기본값"은 두지 않았다(결정 5 "매핑 단위"로 충분). 전략에는 `ReconcileIntervalMinutes`(60)·`DeleteMaxRatio`(0.1). 모두 기본값이면 작업 파일에 쓰지 않는다. `HARD`·`DeleteBackup`·`DeleteDetect`는 ③에서.
+  - 대조(`Engine/KeyDiff.cs`): 원본·대상 키를 **정규화 문자열의 UTF-8 바이트 해시(ORA_HASH) 순서**로 나란히 읽고, 같은 해시 묶음 안에서는 문자열로 비교한다(충돌 안전). 4.2에 적은 "키 순서 + 집계 해시 범위"는 쓰지 않았다. 두 DB의 NLS 정렬·열 형식이 달라도 같은 순서가 보장되는 쪽을 골랐다. 순서가 깨진 스트림은 표시 전에 예외. **값 해시 비교(놓친 UPDATE 찾기)는 하지 않았다.** 삭제 감지에는 키만 필요하고, 값 정규화(C22)가 가장 손이 가는 부분이라 필요해질 때 따로 한다.
+  - 정규화(`OracleReconcileStore.Normalize`): 대상 열 형식 기준. 숫자는 `TO_CHAR(CAST(x AS NUMBER), 'TM9', 'NLS_NUMERIC_CHARACTERS=''.,''')`, DATE는 `YYYYMMDDHH24MISS`, TIMESTAMP는 `YYYYMMDDHH24MISSFF6`, CHAR·NCHAR는 `RTRIM`, VARCHAR2는 그대로. 시간대 TIMESTAMP·LOB 등은 키로 못 쓴다(검증 ERROR). 해시 입력은 `UTL_I18N.STRING_TO_RAW(K, 'AL32UTF8')`라 두 DB 문자 집합이 달라도 같은 해시가 된다.
+  - 표시: `UPDATE … SET 표시열 = :MV|SYSDATE WHERE ROWID = :RID AND 표시열 IS NULL AND 키문자열 = :K`(해제는 `= NULL … IS NOT NULL`), 1,000행씩 커밋. ROWID만 믿지 않고 키 문자열을 함께 확인해 대조와 표시 사이에 바뀐 행은 건너뛴다. 같은 값을 다시 넣어도 결과가 같아 배치 경계에서 끊겨도 다음 대조가 맞춘다.
+  - 엔진: 1회성 증분(EXECUTE·RESUME·DRY)은 성공한 뒤 MARK 매핑만 대조, SYNC는 대조 주기마다 MARK는 키 대조·NONE은 행 수만 센다(유령 행 표시). SQL 원본은 건너뛴다. 승인 전·Dry Run은 대조만 하고 로그와 스냅숏(`TaskSnapshot.Reconcile`)에 후보 수·표본 5개를 남긴다. 상한 = max(10, ⌈비율 × 살아 있는 대상⌉). 상한 초과·원본 키 0개·후보 20만 행 초과면 표시하지 않고 WARN. 대조 실패도 WARN이고 이관·동기화는 계속한다.
+  - 승인: 실행이 끝난 뒤 결과 알림의 "삭제 표시 승인…" → 건수·표본·경고 + 확인 체크 → `DeleteApprovedAt` 저장(작업 파일). 지금 도는 동기화에는 반영되지 않고 다음 실행부터 표시한다. 삭제 처리·표시 열·표시 값을 바꾸면 승인이 지워진다(`ColumnsLogic.ChangeDeleteSetting`).
+  - 검증 `삭제 반영`(C20 일부·C23 포함): 테이블 원본, 병합 키(지원 형식), 표시 열(대상에 있음·NULL 허용·쓰기 열 아님), 표시 값(날짜 열은 SYSDATE만·숫자 열은 숫자·문자 길이), 같은 대상 다중 매핑을 어기면 ERROR. 원본 조건(`Where`)은 WARN(계획은 MARK 허용이었으나 조건 밖 행도 표시되므로 경고로 알린다). 전체 이관 모드는 WARN(대조 안 함). 승인 전은 INFO. `증분 기준`에는 소프트 삭제 열로 거르는 조건 WARN(C23)과 "원본에서 지운 행은 대상에 남음" 안내를 붙였다.
+  - 실행 후 검증: **P8-a부터 증분·CDC 실행의 P01이 "원본 전체 vs 이번에 쓴 행"을 비교해 항상 ERROR였던 문제를 고쳤다.** 증분·CDC면 원본 범위 ↔ 대상 전체(MARK면 표시 안 된 행)를 비교하고, 대상이 많으면 "원본에 없는 대상 n행" WARN. P02~P06은 실행 범위를 정할 수 없어 SKIP 한 줄로 알린다.
+  - 화면: 컬럼 매핑 설정 카드에 원본 삭제·표시 열(후보 = NULL 허용이면서 쓰지 않는 열)·표시 값·승인 상태와 취소. 전략 화면에 삭제 표시 상한(증분·CDC)·삭제 대조 주기(CDC). 실행 화면 진행 카드에 매핑별 대조 줄, 결과 알림에 승인 링크.
+  - 함께 고친 버그: `SqlSourceAnalyzer`의 DESCRIBE 캐시 키가 열 목록을 빼고 있어, 같은 SQL을 다른 DESCRIBE로 다시 분석해도 옛 결과가 돌아왔다(시험 순서에 따라 `SqlSourceServiceTests`가 가끔 실패). 키에 열 목록을 넣었다.
+  - 시험: `Engine/KeyDiffTests.cs`(분류·해시 충돌·배치 경계·순서 깨짐·수집 한도·키 형식), `Engine/ReconcileRunTests.cs`(승인 전 대기 → Dry Run 예정 → 승인 뒤 표시 → 재실행 그대로 → 다시 나타나면 해제, 상한·원본 0개 멈춤, SYNC 행 수 대조 주기, SQL 원본 건너뜀, 대조 실패는 경고, 대조 저장소 없음·전체 모드, Oracle SQL 문자열), `ValidationEngineTests.RunPre_delete_*`·`RunPre_incremental_warns_*`·`Mark_value_*`, `PostValidationEngineTests.RunPost_incremental_*`, `CoreUnitTests.JobFile_delete_*`, `RunLogicTests.Reconcile_lines_*`·`Changing_delete_settings_*`, `SqlSourceServiceTests.VirtualTable_is_not_served_*`, Oracle IT `ReconcileOracleTests`(이 환경에는 DSN이 없어 실행 못 함).
+- 순서: ① 유령 행 표시(3.6, 삭제 없이도 들어감) + C23 → ② 키·해시 대조(4.2) + `MARK` → ③ `HARD` + 3.3 규칙 전부(▾ 대화상자·C20~C22·첫 실행 Dry Run·상한·보관·로그·되돌리기) → ④ `FLASHBACK` 감지(4.2b)는 요구가 있을 때만.
+- 완료 조건(자동 시험):
+  - `MigrationEngineTests`: 원본에서 2행 삭제 → 삭제 꺼짐이면 대상 유지 + 스냅샷에 차이 2 표시 / 켜짐이면 Dry Run이 2건 보고하고 승인 전 대상 불변 / 승인 뒤 보관 테이블(가짜)에 2행 복사된 **뒤** 대상에서 삭제 / 보관 실패 시 삭제 0건.
+  - 상한: 대상 100행 중 원본에 없는 행 20행, `DeleteMaxRatio = 0.1` → 삭제 0건 + 중단 사유.
+  - 자격: `Where`가 있는 매핑, 같은 대상에 매핑 둘 → `ValidationEngineTests` C20 ERROR. `DeleteBackup` 비움 → C21 ERROR. 실행 중 보관 위치 실패(가짜 보관소가 예외) → 삭제 0건·다른 위치로 대체하지 않음·작업 `failed`.
+  - 되돌리기: 보관에서 `RUN_ID`로 2행 복원 → 대상 행 수 원복.
+  - Oracle IT: DATE·NUMBER·VARCHAR2 열의 같은 데이터가 양쪽에서 같은 해시, 삭제 1건이 `MIG_DELETED_*`에 남고 같은 트랜잭션으로 커밋.
+
+### P8-e LogMiner (선택, 6장 답에 따라)
+- 4.3. 시험 환경 구축이 선행 작업.
+
+### 손대는 파일 (P8-a~d)
+`Model/Codes.cs`, `Model/MigrationJob.cs`, `Jobs/JobFile.cs`, `Jobs/JobSamples.cs`, `Engine/EngineModels.cs`, `Engine/RunPlanner.cs`, `Engine/MigrationEngine.cs`, `Hosting/RunLauncher.cs`, `Hosting/HostingContracts.cs`, `Hosting/RunGuard.cs`, `Adapters/Oracle/Engine/OracleSourceFactory.cs`, `Adapters/Oracle/Engine/OracleTargetFactory.cs`, `Sql/SqlGenerator.cs`, `Validation/ValidationEngine.cs`, `MigrationAgent/AgentHost.cs`, `Ui/Pages/ConnectionPage.cs`, `Ui/Pages/RunPage.cs`, `Logic/RunLogic.cs`, `tests/.../Engine/Fakes/MemoryFakes.cs`(시계·변경 주입), `README.md`, `docs/design-docs/README.md`.
+
+---
+
+## 6. 결정이 필요한 질문
+
+플랜의 절반은 이 답에 달려 있다. 답 없이 코드를 시작하면 추측으로 간다.
+
+1. **"CDC"가 뜻하는 것**: 수정시각 기반 주기 동기화(A)로 충분한가, 로그 기반(D)이 요구인가? 요구가 D라면 원본 운영 DBA에게 ARCHIVELOG·보조 로깅·`LOGMINING` 권한을 받을 수 있는가? (지금까지의 결정은 A를 기본으로 전제)
+2. ~~삭제 전파가 필요한가?~~ **결정됨**: 옵션 제공, 기본 꺼짐, 매핑 단위, 감지는 키·해시 대조 1순위(3.3·4.2). 원본 삭제 열 유무는 환경마다 다르므로 매핑에서 고른다.
+3. **원본에 어떤 변경도 못 하는가?** (트리거·보조 로깅 DDL 모두 불가인지) — 불가면 E와 D는 사실상 제외.
+4. **대상 Oracle 버전·멀티테넌트 여부**(원본 쪽): 19c PDB면 LogMiner 접속 방식이 달라진다.
+5. ~~운영 방식~~ **결정됨**: 상시·기간 한정 모두 허용. 기본 종료 조건 24시간, 무기한은 명시 선택, 3.7 안전장치. 서비스화는 하지 않는다.
+6. ~~라벨~~ **결정됨**: "CDC (변경동기화)" + 힌트 한 줄.
+7. ~~보관 테이블 위치~~ **결정됨**: 삭제를 켤 때 `TABLE`(대상 DB `MIG_DELETED_*`) 또는 `FILE`(로컬 JSON)을 사용자가 반드시 고른다. 자동 선택·자동 대체 없음. 운영 대상에 테이블을 못 만드는 환경은 `FILE`을 고르되 단일 PC 복구 한계를 경고로 안내한다.

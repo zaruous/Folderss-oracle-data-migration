@@ -128,6 +128,112 @@ namespace MigrationStudio.Ui.Modals
             return ok;
         }
 
+        /// <summary>CDC(변경동기화) 시작 확인. 창을 닫아도 도는 실행이라 "언제까지 · 얼마나 자주 · 어디에 쓰는지"를 한 번 더 보여 준다.</summary>
+        public static bool ConfirmSync(Window owner, ConnectionProfile target, MigrationStrategy strategy, AgentSettings agent)
+        {
+            strategy = strategy ?? new MigrationStrategy();
+            agent = agent ?? new AgentSettings();
+            var window = DialogKit.Create(owner, "CDC(변경동기화) 시작", 500);
+            var body = DialogKit.Body(window);
+            var production = target != null && target.Color == "red";
+            body.Children.Add(DialogKit.Target(target, "대상" + (production ? " 운영 DB" : "") + "에 주기마다 변경을 반영합니다."));
+            var lines = new List<string>
+            {
+                "주기: " + strategy.PollIntervalSeconds + "초마다 워터마크 다음 행을 읽어 INSERT+UPDATE" +
+                    (strategy.LagSeconds > 0 ? " · 지연 창 " + strategy.LagSeconds + "초(날짜 체크포인트는 그만큼 늦게 반영)" : ""),
+                "종료: " + (strategy.MaxRunHours > 0 ? "최대 " + strategy.MaxRunHours + "시간 뒤 자동 종료 (또는 중지 버튼)" : "무기한 — 중지 버튼을 누를 때까지"),
+                "창을 닫으면: " + (string.Equals(agent.OnHostExit, "STOP", System.StringComparison.OrdinalIgnoreCase)
+                    ? "Folderss를 닫을 때 함께 중지 (설정 > 에이전트)"
+                    : "Folderss를 닫아도 에이전트가 계속 동기화 (설정 > 에이전트에서 바꿀 수 있음)"),
+                "절전·재부팅·로그아웃이면 멈추고 스스로 다시 시작하지 않음 — 다시 열면 워터마크 다음부터 이어 감",
+                "동기화가 도는 동안 같은 작업의 다른 실행은 할 수 없음"
+            };
+            var list = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            foreach (var line in lines)
+            {
+                var t = Theme.Text("• " + line);
+                t.TextWrapping = TextWrapping.Wrap;
+                t.FontSize = 12;
+                t.Margin = new Thickness(0, 0, 0, 4);
+                list.Children.Add(t);
+            }
+
+            body.Children.Add(list);
+            if (strategy.MaxRunHours <= 0 || production)
+            {
+                var warn = new TextBlock
+                {
+                    Text = (production ? "운영 DB에 상시로 씁니다. " : "") + (strategy.MaxRunHours <= 0 ? "종료 시간이 없어 잊으면 계속 돕니다." : ""),
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Foreground = Theme.Warning
+                };
+                body.Children.Add(warn);
+            }
+
+            var check = DialogKit.Check("위 내용을 확인했습니다");
+            body.Children.Add(check);
+            var ok = false;
+            var run = DialogKit.PrimaryButton("동기화 시작");
+            run.IsEnabled = false;
+            check.Checked += (s, e) => run.IsEnabled = true;
+            check.Unchecked += (s, e) => run.IsEnabled = false;
+            run.Click += (s, e) => { ok = true; window.DialogResult = true; };
+            body.Children.Add(DialogKit.Buttons(DialogKit.CancelButton("취소", true), run));
+            Show(window);
+            return ok;
+        }
+
+        /// <summary>
+        /// 삭제 표시 승인. 대조에서 본 건수·표본을 보여 주고 확인 체크를 받는다. 승인은 작업에 저장되고 다음 실행부터 표시한다
+        /// (지금 도는 동기화는 시작할 때의 작업을 쓰므로 바뀌지 않음).
+        /// </summary>
+        public static bool ConfirmDeleteMark(Window owner, ConnectionProfile target, Mapping mapping, MigrationStudio.Core.Engine.ReconcileSnapshot result)
+        {
+            var window = DialogKit.Create(owner, "삭제 표시 승인", 500);
+            var body = DialogKit.Body(window);
+            var production = target != null && target.Color == "red";
+            body.Children.Add(DialogKit.Target(target, "대상" + (production ? " 운영 DB" : "") + "의 " + mapping.Target + "에서 원본에 없는 행을 표시합니다."));
+            var lines = new List<string>
+            {
+                "표시: " + mapping.MarkColumn + " = " + mapping.MarkValue + " (행은 지우지 않음)",
+                "이번 대조: 원본에 없는 대상 " + (result != null ? result.MarkCandidates.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("en-US")) : "?") + "행" +
+                    (result != null && result.Samples != null && result.Samples.Count > 0 ? " · 예: " + string.Join(" / ", result.Samples) : ""),
+                "다음 실행부터 대조할 때마다 표시하고, 원본에 다시 나타난 행은 표시를 NULL로 되돌림",
+                "한 번에 살아 있는 대상 행의 일정 비율(전략의 상한)을 넘으면 표시하지 않고 멈춤",
+                "표시 처리·열·값을 바꾸면 승인이 지워짐"
+            };
+            var list = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            foreach (var line in lines)
+            {
+                var t = Theme.Text("• " + line);
+                t.TextWrapping = TextWrapping.Wrap;
+                t.FontSize = 12;
+                t.Margin = new Thickness(0, 0, 0, 4);
+                list.Children.Add(t);
+            }
+
+            body.Children.Add(list);
+            if (!string.IsNullOrWhiteSpace(mapping.Where))
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = "원본 조건(" + mapping.Where.Trim() + ") 밖의 대상 행도 표시됩니다.",
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Foreground = Theme.Warning
+                });
+            }
+
+            var check = DialogKit.Check("표시될 행을 확인했습니다");
+            body.Children.Add(check);
+            var ok = false;
+            var approve = DialogKit.PrimaryButton("승인");
+            approve.IsEnabled = false;
+            check.Checked += (s, e) => approve.IsEnabled = true;
+            check.Unchecked += (s, e) => approve.IsEnabled = false;
+            approve.Click += (s, e) => { ok = true; window.DialogResult = true; };
+            body.Children.Add(DialogKit.Buttons(DialogKit.CancelButton("취소", true), approve));
+            Show(window);
+            return ok;
+        }
+
         private static bool Show(Window window)
         {
             if (AppServices.DevHostCaptureMode)

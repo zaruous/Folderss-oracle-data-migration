@@ -59,6 +59,24 @@ namespace MigrationStudio.Core.Model
         /// <summary>오류 테이블 이름 또는 접두어(끝이 _면 접두어: ERR$_ → ERR$_TB_MEMBER).</summary>
         public string ErrorTable { get; set; } = "ERR$_";
         public int Workers { get; set; } = 4;
+
+        /// <summary>CDC(변경동기화)에서 주기 사이 대기 초. 주기마다 워터마크 이후 행을 읽어 MERGE한다.</summary>
+        public int PollIntervalSeconds { get; set; } = 60;
+
+        /// <summary>CDC(변경동기화) 최대 실행 시간(시간). 0이면 무기한 — 사용자가 명시적으로 골랐을 때만.</summary>
+        public int MaxRunHours { get; set; } = 24;
+
+        /// <summary>
+        /// 지연 창(초). 체크포인트 열이 날짜·시각이면 "원본 현재 시각 − 지연 창"까지만 읽는다 — 수정시각은 과거인데 커밋이 늦은 행을
+        /// 워터마크가 지나치지 않게. 가장 긴 트랜잭션보다 커야 하고, 그만큼 반영이 늦어진다.
+        /// </summary>
+        public int LagSeconds { get; set; } = 300;
+
+        /// <summary>삭제 대조(원본·대상 키 비교) 주기(분). CDC에서만 — 증분 이관은 실행할 때마다 한 번.</summary>
+        public int ReconcileIntervalMinutes { get; set; } = 60;
+
+        /// <summary>한 번의 대조에서 삭제 표시할 수 있는 대상 행 비율 상한. 넘으면 표시하지 않고 멈춘다(접속·조건 오류로 대량 표시하는 것을 막음).</summary>
+        public double DeleteMaxRatio { get; set; } = 0.1;
     }
 
     /// <summary>
@@ -92,6 +110,21 @@ namespace MigrationStudio.Core.Model
         public int? CommitSize { get; set; }
 
         public List<ColumnMapping> Columns { get; set; } = new List<ColumnMapping>();
+
+        /// <summary>원본에서 지운 행 처리(<see cref="DeleteModes"/>). 증분·CDC에서만 쓴다.</summary>
+        public string DeleteMode { get; set; } = DeleteModes.None;
+
+        /// <summary>MARK일 때 대상의 표시 열. NULL 허용이어야 한다(NULL = 살아 있음, 값 = 원본에서 지워짐).</summary>
+        public string MarkColumn { get; set; }
+
+        /// <summary>MARK일 때 넣을 값. SYSDATE면 그 시각, 아니면 문자 그대로(Oracle이 열 형식으로 바꿈).</summary>
+        public string MarkValue { get; set; }
+
+        /// <summary>
+        /// 삭제 표시를 승인한 시각. null이면 대조만 하고 표시하지 않는다 — Dry Run에서 표시될 행을 보고 승인해야 실제로 표시한다.
+        /// 삭제 처리·표시 열·표시 값을 바꾸면 지운다.
+        /// </summary>
+        public string DeleteApprovedAt { get; set; }
 
         [JsonIgnore]
         public bool IsSql

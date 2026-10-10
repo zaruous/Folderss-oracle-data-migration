@@ -10,6 +10,7 @@ using System.Windows.Media;
 using MigrationStudio.Core.Engine;
 using MigrationStudio.Core.Hosting;
 using MigrationStudio.Core.Model;
+using MigrationStudio.Core.Settings;
 using MigrationStudio.Core.Validation;
 using MigrationStudio.Logic;
 using MigrationStudio.Services;
@@ -31,6 +32,8 @@ namespace MigrationStudio.Ui.Pages
 
         // 갱신할 칸들(Rebuild에서 만든다)
         private TextBlock _rowsText, _ofText, _pctText, _currentText, _runIdText;
+        private TextBlock _syncText;
+        private TextBlock _reconcileText;
         private Border _statePill;
         private ProgressBarView _bar;
         private readonly Dictionary<string, TextBlock> _stats = new Dictionary<string, TextBlock>();
@@ -318,6 +321,28 @@ namespace MigrationStudio.Ui.Pages
                     links.Children.Add(Kit.LinkButton("실행 후 검증 ›", () => { State.Ui.ValTab = "post"; _host.GoToStep(3); }));
                 }
 
+                foreach (var task in RunLogic.ApprovalCandidates(snap))
+                {
+                    var mapping = State.Mapping(task.Key);
+                    if (mapping == null || !DeleteModes.IsMark(mapping.DeleteMode) || !string.IsNullOrEmpty(mapping.DeleteApprovedAt))
+                    {
+                        continue;
+                    }
+
+                    var candidate = task;
+                    var approve = Kit.LinkButton("삭제 표시 승인… (" + mapping.Target + ")", () =>
+                    {
+                        if (RunDialogs.ConfirmDeleteMark(_host.Owner, State.ProfileForRole(Roles.Target), mapping, candidate.Reconcile))
+                        {
+                            mapping.DeleteApprovedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+                            State.MarkChanged();
+                            Rebuild();
+                        }
+                    });
+                    approve.Margin = new Thickness(0, 0, 12, 0);
+                    links.Children.Add(approve);
+                }
+
                 if (view.State != RunStates.Done)
                 {
                     var resume = Kit.LinkButton("체크포인트에서 재개 ›", () => StartRun("RESUME"));
@@ -520,7 +545,7 @@ namespace MigrationStudio.Ui.Pages
             var modeField = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
             modeField.Children.Add(Kit.SectionLabel("실행 모드 (Run Mode)"));
             modeField.Children.Add(modeSeg);
-            var desc = Theme.Secondary(RunLogic.ModeDescription(mode));
+            var desc = Theme.Secondary(RunLogic.ModeDescription(mode, st.Mode));
             desc.TextWrapping = TextWrapping.Wrap;
             desc.FontSize = 11.5;
             desc.Margin = new Thickness(0, 6, 0, 0);
@@ -660,6 +685,17 @@ namespace MigrationStudio.Ui.Pages
             _currentText.FontSize = 12;
             _currentText.Margin = new Thickness(0, 0, 0, 8);
             body.Children.Add(_currentText);
+            _syncText = Theme.Secondary("");
+            _syncText.FontSize = 12;
+            _syncText.Margin = new Thickness(0, 0, 0, 8);
+            _syncText.Visibility = Visibility.Collapsed;
+            body.Children.Add(_syncText);
+            _reconcileText = Theme.Secondary("");
+            _reconcileText.FontSize = 12;
+            _reconcileText.TextWrapping = TextWrapping.Wrap;
+            _reconcileText.Margin = new Thickness(0, 0, 0, 8);
+            _reconcileText.Visibility = Visibility.Collapsed;
+            body.Children.Add(_reconcileText);
             _bar = new ProgressBarView(8);
             _bar.Root.Margin = new Thickness(0, 0, 0, 12);
             body.Children.Add(_bar.Root);
@@ -804,6 +840,12 @@ namespace MigrationStudio.Ui.Pages
                 ? "지금: " + current.Label + " (" + (snap.Tasks.IndexOf(current) + 1) + "/" + snap.Tasks.Count + ")"
                 : snap == null ? SelectedSummary() : "";
             _bar.Set(pct, state == RunStates.Paused || state == RunStates.Pausing ? "paused" : state == RunStates.Done ? "done" : state == RunStates.Stopped || state == RunStates.Failed ? "stopped" : "");
+            var syncLine = RunLogic.SyncSummary(snap, DateTime.Now);
+            _syncText.Text = syncLine ?? "";
+            _syncText.Visibility = syncLine == null ? Visibility.Collapsed : Visibility.Visible;
+            var reconcile = RunLogic.ReconcileLines(snap, view != null && view.Dry);
+            _reconcileText.Text = string.Join("\n", reconcile);
+            _reconcileText.Visibility = reconcile.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
 
             _stats["rate"].Text = snap != null && state == RunStates.Running ? RunLogic.Rate(snap.Rate) + " 행/초" : "—";
             _stats["elapsed"].Text = snap != null ? RunLogic.Duration(snap.Elapsed) : "—";
@@ -1197,6 +1239,8 @@ namespace MigrationStudio.Ui.Pages
             var destructive = sel.Where(m => RunLogic.IsDestructive(m.Mode))
                 .Select(m => WriteModes.Of(m.Mode).Label + "  " + schema + "." + m.Target).ToList();
             inputs.DestructiveLabels = destructive;
+            var strategy = State.Job.Strategy ?? new MigrationStrategy();
+            inputs.IsSync = mode != "DRY" && string.Equals(strategy.Mode, ExecutionModes.Cdc, StringComparison.Ordinal);
 
             for (var guard = 0; guard < 8; guard++)
             {
@@ -1250,6 +1294,15 @@ namespace MigrationStudio.Ui.Pages
                         }
 
                         inputs.DestructiveAccepted = true;
+                        continue;
+                    case StartGate.ConfirmSync:
+                        var agent = State.Settings != null && State.Settings.Agent != null ? State.Settings.Agent : new AgentSettings();
+                        if (!RunDialogs.ConfirmSync(_host.Owner, target, strategy, agent))
+                        {
+                            return;
+                        }
+
+                        inputs.SyncAccepted = true;
                         continue;
                     default:
                         Launch(mode, selection);

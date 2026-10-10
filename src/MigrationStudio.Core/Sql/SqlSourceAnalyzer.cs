@@ -41,7 +41,9 @@ namespace MigrationStudio.Core.Sql
             var bindKey = string.Join(",", (mapping.Binds ?? new List<BindParameter>())
                 .Select(b => b.Name + "=" + b.Value));
             var schemaKey = source != null ? source.Schema : "";
-            var key = schemaKey + "\u0000" + mapping.Source + "\u0000" + mapping.Sql + "\u0000" + bindKey + "\u0000D";
+            // DESCRIBE 결과도 키에 넣는다 — 빠지면 같은 SQL을 다른 열 목록으로(또는 빈 목록으로) 먼저 분석한 결과가 그대로 돌아온다.
+            var describedKey = string.Join(",", described.Select(c => c.Name + ":" + c.Type + ":" + (c.Nullable ? "1" : "0")));
+            var key = schemaKey + "\u0000" + mapping.Source + "\u0000" + mapping.Sql + "\u0000" + bindKey + "\u0000D" + describedKey;
             lock (VirtualCache)
             {
                 if (VirtualCache.TryGetValue(key, out var cached))

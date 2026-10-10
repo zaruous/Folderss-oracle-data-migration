@@ -79,7 +79,9 @@ namespace MigrationStudio.Logic
         AskValidateFirst,
         Blocked,
         ConfirmStale,
-        ConfirmDestructive
+        ConfirmDestructive,
+        /// <summary>CDC(변경동기화) 시작: 창을 닫아도 계속 도는 실행이라 주기·종료 조건·대상을 보여 주고 확인을 받는다.</summary>
+        ConfirmSync
     }
 
     public sealed class StartInputs
@@ -97,6 +99,9 @@ namespace MigrationStudio.Logic
         public bool SkipValidateAsk { get; set; }
         public bool StaleAccepted { get; set; }
         public bool DestructiveAccepted { get; set; }
+        /// <summary>전략이 CDC(변경동기화)이고 Dry Run이 아님 — 주기 반복 실행.</summary>
+        public bool IsSync { get; set; }
+        public bool SyncAccepted { get; set; }
     }
 
     /// <summary>실행 화면의 순수 논리(WPF 없음, 시험 대상).</summary>
@@ -155,8 +160,32 @@ namespace MigrationStudio.Logic
                 return "";
             }
 
-            var names = string.Join(", ", list.Select(r => (string.IsNullOrEmpty(r.JobName) ? "(이름 없음)" : r.JobName) + " · " + r.RunId));
+            return ReattachNoticeText(alive, DateTime.Now);
+        }
+
+        public static string ReattachNoticeText(IList<AgentRunInfo> alive, DateTime now)
+        {
+            var list = AliveForReattach(alive);
+            if (list.Count == 0)
+            {
+                return "";
+            }
+
+            var names = string.Join(", ", list.Select(r => (string.IsNullOrEmpty(r.JobName) ? "(이름 없음)" : r.JobName) + " · " + r.RunId + SyncTail(r, now)));
             return "진행 중인 실행 " + list.Count + "개가 다른 창에서 시작되어 아직 돌고 있습니다: " + names;
+        }
+
+        /// <summary>동기화 실행이면 "마지막 주기 n분 전". 오래됐으면(1시간 넘게) 멈춘 것일 수 있다고 덧붙인다.</summary>
+        private static string SyncTail(AgentRunInfo run, DateTime now)
+        {
+            if (run == null || !run.LastCycleAt.HasValue)
+            {
+                return "";
+            }
+
+            var minutes = Math.Max(0, (now - run.LastCycleAt.Value).TotalMinutes);
+            var ago = minutes < 1 ? "방금" : minutes < 60 ? Math.Floor(minutes) + "분 전" : Math.Floor(minutes / 60) + "시간 전";
+            return " (동기화 주기 " + run.Cycle + " · 마지막 " + ago + (minutes >= 60 ? " — 멈췄을 수 있음, 붙어서 확인" : "") + ")";
         }
 
         public static bool IsActive(string state)
@@ -219,11 +248,148 @@ namespace MigrationStudio.Logic
 
         public static string ModeDescription(string mode)
         {
+            return ModeDescription(mode, false);
+        }
+
+        /// <summary>전략 모드(FULL·INCREMENTAL·CDC)에 맞는 실행 모드 설명.</summary>
+        public static string ModeDescription(string mode, string strategyMode)
+        {
+            if (string.Equals(strategyMode, ExecutionModes.Cdc, System.StringComparison.Ordinal))
+            {
+                if (mode == "DRY")
+                {
+                    return ModeDescription(mode, true);
+                }
+
+                return "CDC(변경동기화): 워터마크 다음 행을 읽어 반영한 뒤 주기만큼 기다렸다가 반복합니다. 중지하거나 최대 실행 시간이 될 때까지 계속 돌고, 창을 닫아도 에이전트가 계속합니다.";
+            }
+
+            return ModeDescription(mode, string.Equals(strategyMode, ExecutionModes.Incremental, System.StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// 삭제 대조 결과 줄(작업마다 한 줄). 따라가지 않는 매핑도 원본·대상 행 수 차이를 숨기지 않고 보인다.
+        /// </summary>
+        public static List<string> ReconcileLines(RunSnapshot snap, bool dry)
+        {
+            var lines = new List<string>();
+            if (snap == null || snap.Tasks == null)
+            {
+                return lines;
+            }
+
+            foreach (var task in snap.Tasks)
+            {
+                var r = task.Reconcile;
+                if (r == null)
+                {
+                    continue;
+                }
+
+                var head = task.Label + ": ";
+                var at = " · " + r.At.ToString("HH:mm", CultureInfo.InvariantCulture) + " 대조";
+                if (!string.IsNullOrEmpty(r.Error))
+                {
+                    lines.Add(head + "삭제 대조 실패 — " + r.Error.Split('\n')[0] + at);
+                    continue;
+                }
+
+                if (!DeleteModes.IsMark(r.Mode))
+                {
+                    var diff = r.TargetRows - r.SourceRows;
+                    lines.Add(head + "원본 " + N(r.SourceRows) + " · 대상 " + N(r.TargetRows) +
+                        (diff > 0 ? " · 원본에 없는 대상 " + N(diff) + "행(삭제 따라가지 않음)" : diff < 0 ? " · 대상이 " + N(-diff) + "행 적음" : " · 일치") + at);
+                    continue;
+                }
+
+                var samples = r.Samples != null && r.Samples.Count > 0 ? " (예: " + string.Join(" / ", r.Samples) + ")" : "";
+                if (!string.IsNullOrEmpty(r.Blocked))
+                {
+                    lines.Add(head + "삭제 표시 멈춤 — " + r.Blocked + at);
+                }
+                else if (dry || !r.Approved)
+                {
+                    lines.Add(head + (dry ? "삭제 표시 예정 " : "삭제 표시 대기(승인 전) ") + N(r.MarkCandidates) + "행" +
+                        (r.UnmarkCandidates > 0 ? " · 표시 해제 " + N(r.UnmarkCandidates) + "행" : "") + samples + at);
+                }
+                else
+                {
+                    lines.Add(head + "삭제 표시 " + N(r.Marked) + "행" + (r.Unmarked > 0 ? " · 표시 해제 " + N(r.Unmarked) + "행" : "") +
+                        " · 이 실행 누적 " + N(r.TotalMarked) + " · 이미 표시 " + N(r.AlreadyMarked + r.Marked) + at);
+                }
+            }
+
+            return lines;
+        }
+
+        /// <summary>끝난 실행에서 승인을 받을 수 있는 작업: 삭제 표시 매핑, 승인 전, 대조가 실패·멈추지 않음.</summary>
+        public static List<TaskSnapshot> ApprovalCandidates(RunSnapshot snap)
+        {
+            var list = new List<TaskSnapshot>();
+            if (snap == null || snap.Tasks == null)
+            {
+                return list;
+            }
+
+            foreach (var task in snap.Tasks)
+            {
+                var r = task.Reconcile;
+                if (r != null && DeleteModes.IsMark(r.Mode) && !r.Approved && string.IsNullOrEmpty(r.Error) && string.IsNullOrEmpty(r.Blocked))
+                {
+                    list.Add(task);
+                }
+            }
+
+            return list;
+        }
+
+        /// <summary>진행 카드의 동기화 한 줄. SYNC가 아니면 null.</summary>
+        public static string SyncSummary(RunSnapshot snap, System.DateTime now)
+        {
+            if (snap == null || snap.Sync == null)
+            {
+                return null;
+            }
+
+            var s = snap.Sync;
+            var text = "주기 " + s.Cycle;
+            if (s.Phase == "waiting" && s.NextCycleAt.HasValue)
+            {
+                var wait = Math.Max(0, (s.NextCycleAt.Value - now).TotalSeconds);
+                text += " 완료 · 다음 주기 " + s.NextCycleAt.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture) + " (" + Duration(wait) + " 뒤)";
+            }
+            else if (s.Phase == "cycle")
+            {
+                text += " 실행 중";
+            }
+
+            if (s.LastCycleAt.HasValue)
+            {
+                text += " · 마지막 주기 " + s.LastCycleAt.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            }
+
+            text += " · 누적 삽입 " + N(s.Inserted) + " · 갱신 " + N(s.Updated) + (s.Rejected > 0 ? " · 거부 " + N(s.Rejected) : "");
+            if (s.ConsecutiveFailures > 0)
+            {
+                text += " · 일시 오류 " + s.ConsecutiveFailures + "회 연속(재시도 중)";
+            }
+
+            return text;
+        }
+
+        /// <summary>실행 모드 설명. 전략이 증분 이관이면 실행·Dry Run은 워터마크(지난 실행의 마지막 키) 다음부터 읽는다는 점을 적는다.</summary>
+        public static string ModeDescription(string mode, bool incremental)
+        {
             switch (mode)
             {
-                case "DRY": return "원본을 읽고 변환·매핑까지만 합니다. 대상에 쓰지 않고 예상 입력·갱신·거부 수를 보여 줍니다.";
-                case "RESUME": return "체크포인트가 있는 작업은 마지막 커밋 키 다음부터(WHERE 키 > :LAST_ID) 이어서 합니다.";
-                default: return "처음부터 실행합니다. MERGE는 이미 있는 행을 갱신하므로 다시 실행해도 중복이 생기지 않습니다.";
+                case "DRY":
+                    return (incremental ? "워터마크 이후 행만 " : "") + "원본을 읽고 변환·매핑까지만 합니다. 대상에 쓰지 않고 예상 입력·갱신·거부 수를 보여 줍니다.";
+                case "RESUME":
+                    return "체크포인트가 있는 작업은 마지막 커밋 키 다음부터(WHERE 키 > :LAST_ID) 이어서 합니다.";
+                default:
+                    return incremental
+                        ? "증분 이관: 매핑의 체크포인트 열 기준으로 지난 실행의 마지막 키(워터마크) 다음 행만 읽습니다. 워터마크가 없는 작업은 처음부터 읽습니다(첫 적재)."
+                        : "처음부터 실행합니다. MERGE는 이미 있는 행을 갱신하므로 다시 실행해도 중복이 생기지 않습니다.";
             }
         }
 
@@ -460,6 +626,11 @@ namespace MigrationStudio.Logic
             if (i.DestructiveLabels != null && i.DestructiveLabels.Count > 0 && !i.DestructiveAccepted)
             {
                 return StartGate.ConfirmDestructive;
+            }
+
+            if (i.IsSync && !i.SyncAccepted)
+            {
+                return StartGate.ConfirmSync;
             }
 
             return StartGate.Proceed;

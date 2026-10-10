@@ -89,6 +89,53 @@ namespace MigrationStudio.Logic
             }
         }
 
+        /// <summary>삭제 표시 열 후보: 대상의 NULL 허용 열 중 이 매핑이 값을 쓰지 않는 열(쓰면 이관이 표시를 덮어씀).</summary>
+        public static List<string> MarkColumnCandidates(Mapping m, TableMetadata target)
+        {
+            var list = new List<string>();
+            if (m == null || target == null || target.Columns == null)
+            {
+                return list;
+            }
+
+            var written = new HashSet<string>(Core.Sql.SqlGenerator.WriteColumns(m, target).Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+            foreach (var c in target.Columns)
+            {
+                if (c.Nullable && !written.Contains(c.Name))
+                {
+                    list.Add(c.Name);
+                }
+            }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 삭제 처리 설정을 바꾼다. 실제로 바뀌면 승인을 지운다 — 승인은 "이 설정으로 이 행들을 표시해도 된다"는 확인이라 설정이 바뀌면 다시 받아야 한다.
+        /// 바뀌었으면 true.
+        /// </summary>
+        public static bool ChangeDeleteSetting(Mapping m, string mode, string markColumn, string markValue)
+        {
+            if (m == null)
+            {
+                return false;
+            }
+
+            mode = string.IsNullOrEmpty(mode) ? DeleteModes.None : mode;
+            if (string.Equals(m.DeleteMode ?? DeleteModes.None, mode, StringComparison.Ordinal)
+                && string.Equals(m.MarkColumn ?? "", markColumn ?? "", StringComparison.Ordinal)
+                && string.Equals((m.MarkValue ?? "").Trim(), (markValue ?? "").Trim(), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            m.DeleteMode = mode;
+            m.MarkColumn = string.IsNullOrEmpty(markColumn) ? null : markColumn;
+            m.MarkValue = string.IsNullOrWhiteSpace(markValue) ? null : markValue.Trim();
+            m.DeleteApprovedAt = null;
+            return true;
+        }
+
         public static List<string> CheckpointCandidates(TableMetadata source)
         {
             var list = new List<string> { "(없음 — 재개 불가)" };

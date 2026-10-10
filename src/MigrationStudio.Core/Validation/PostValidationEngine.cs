@@ -75,6 +75,16 @@ namespace MigrationStudio.Core.Validation
                     continue;
                 }
 
+                if (IsIncrementalJob())
+                {
+                    // 증분·CDC 실행은 "이번에 쓴 행"이 원본 전체가 아니다 — 대상 전체와 원본 범위의 행 수를 비교하고,
+                    // 키·데이터 비교(P02~P06)는 실행 범위를 정할 수 없어 건너뛴다(전체 이관 실행에서 검증).
+                    await RunIncrementalP01Async(items, onItem, plan, group, ct).ConfigureAwait(false);
+                    Emit(items, onItem, PostItemOf(group, "키·데이터 비교", "—", "—", CheckLevels.Skip,
+                        "증분·CDC 실행은 행 수만 비교 — PK 누락·중복·샘플·해시는 전체 이관 실행 뒤에 검증", mappingId));
+                    continue;
+                }
+
                 var baseRows = BaseRowsFor(task.Key);
                 var partial = !string.Equals(task.Status, "done", StringComparison.Ordinal);
                 await RunP01Async(items, onItem, request, plan, task, group, baseRows, partial, ct).ConfigureAwait(false);
@@ -154,6 +164,54 @@ namespace MigrationStudio.Core.Validation
             }
 
             Emit(items, onItem, PostItemOf(group, "행 수", srcText, tgtText, level, detail, mappingId));
+        }
+
+        private bool IsIncrementalJob()
+        {
+            var mode = _context.Job != null && _context.Job.Strategy != null ? _context.Job.Strategy.Mode : null;
+            return string.Equals(mode, ExecutionModes.Incremental, StringComparison.Ordinal) || string.Equals(mode, ExecutionModes.Cdc, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 증분·CDC의 행 수 비교: 원본 범위 전체 ↔ 대상 전체(삭제 표시 매핑이면 표시 안 된 행만). 대상이 많으면 원본에서 지운 행이 남은 것일 수 있어
+        /// 숨기지 않고 WARN으로 보인다 — 삭제 처리를 "따라가지 않음"으로 둔 매핑에서 차이가 조용히 쌓이지 않게.
+        /// </summary>
+        private async Task RunIncrementalP01Async(List<PostItem> items, Action<PostItem> onItem, PlanItem plan, string group, CancellationToken ct)
+        {
+            var mark = DeleteModes.IsMark(plan.Mapping.DeleteMode) && !string.IsNullOrWhiteSpace(plan.Mapping.MarkColumn);
+            var srcCount = await CountOnSourceAsync(plan, ct).ConfigureAwait(false);
+            var tgtCount = await CountOnTargetAsync(PostValidationSql.TargetRowCount(_context.TargetMeta.Schema, plan.Mapping.Target,
+                mark ? RequireId(plan.Mapping.MarkColumn) + " IS NULL" : null), ct).ConfigureAwait(false);
+            var srcText = srcCount != null ? Format.Number(srcCount.Value) : "?";
+            var tgtText = tgtCount != null ? Format.Number(tgtCount.Value) : "?";
+            if (srcCount == null || tgtCount == null)
+            {
+                Emit(items, onItem, PostItemOf(group, "행 수", srcText, tgtText, CheckLevels.Info, "행 수를 읽지 못함 — 권한·접속 확인", plan.Key));
+                return;
+            }
+
+            var diff = tgtCount.Value - srcCount.Value;
+            string level;
+            string detail;
+            if (diff == 0)
+            {
+                level = CheckLevels.Pass;
+                detail = "MATCH — 대상 " + (mark ? "살아 있는 행" : "전체") + " = 원본 범위";
+            }
+            else if (diff > 0)
+            {
+                level = CheckLevels.Warn;
+                detail = "원본에 없는 대상 행 " + Format.Number(diff) + " — " + (mark
+                    ? "원본에서 지웠지만 아직 표시 안 됨(대조 주기 전·승인 전·상한 초과)"
+                    : "삭제 처리가 '따라가지 않음'이라 원본에서 지운 행이 대상에 남아 있을 수 있음");
+            }
+            else
+            {
+                level = CheckLevels.Warn;
+                detail = "대상이 원본보다 " + Format.Number(-diff) + "행 적음 — 아직 반영 안 된 변경(지연 창 이후·주기 사이)이거나 거부된 행";
+            }
+
+            Emit(items, onItem, PostItemOf(group, "행 수", srcText, tgtText, level, detail, plan.Key));
         }
 
         private async Task RunP02Async(List<PostItem> items, Action<PostItem> onItem, PostValidationRequest request, PlanItem plan,

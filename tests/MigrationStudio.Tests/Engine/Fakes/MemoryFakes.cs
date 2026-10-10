@@ -37,7 +37,7 @@ namespace MigrationStudio.Tests.Engine.Fakes
         }
     }
 
-    internal sealed class MemorySourceFactory : ISourceFactory
+    internal sealed class MemorySourceFactory : ISourceFactory, ISourceClock
     {
         private readonly Dictionary<string, MemoryTable> _tables;
         private int _reads;
@@ -50,12 +50,19 @@ namespace MigrationStudio.Tests.Engine.Fakes
         internal int FailOnRead { get; set; }
         internal int DelayMilliseconds { get; set; }
         internal int ReadCalls { get { return _reads; } }
+        /// <summary>원본 DB 시각(지연 창 상한용). 시험이 시간을 직접 움직인다.</summary>
+        internal Func<DateTime> Now { get; set; } = () => DateTime.Now;
+
+        public Task<DateTime> NowAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Now());
+        }
 
         public Task<ISourceReader> OpenAsync(PlanItem item, KeyRange range, string lastValue, int fetchSize, CancellationToken cancellationToken)
         {
             var table = _tables[item.Mapping.Source];
             var cp = table.Ordinal(item.Mapping.CheckpointColumn);
-            IEnumerable<object[]> selected = cp < 0 ? table.Rows : table.Rows.Where(r => After(r[cp], lastValue) && AtOrAfter(r[cp], range.From) && BeforeOrEqual(r[cp], range.To)).OrderBy(r => r[cp]);
+            IEnumerable<object[]> selected = cp < 0 ? table.Rows : table.Rows.Where(r => After(r[cp], lastValue) && AtOrAfter(r[cp], range.From) && BeforeOrEqual(r[cp], range.To) && BeforeOrEqual(r[cp], range.Upper)).OrderBy(r => r[cp]);
             var rows = selected.Select(r => Project(table, item, r, cp)).ToList();
             var columns = item.WriteColumns.Select(c => c.Name).ToList();
             if (cp >= 0) columns.Add("MIG_CP_HIDDEN");
@@ -191,7 +198,8 @@ namespace MigrationStudio.Tests.Engine.Fakes
                         if (string.Equals(item.Mapping.Mode, WriteModes.Merge, StringComparison.Ordinal) && existing != null)
                         {
                             result.Updated++;
-                            _changes.Add(() => Replace(table, row));
+                            var written = columns.Select(c => table.Ordinal(c.Name)).ToArray();
+                            _changes.Add(() => Replace(table, row, written));
                         }
                         else
                         {
@@ -276,10 +284,12 @@ namespace MigrationStudio.Tests.Engine.Fakes
                 return table.Rows.FirstOrDefault(r => table.Keys.All(k => Equals(r[table.Ordinal(k)], row[table.Ordinal(k)])));
             }
 
-            private static void Replace(MemoryTable table, object[] row)
+            /// <summary>Oracle MERGE처럼 쓰기 열만 바꾼다 — 쓰지 않는 열(삭제 표시 열 등)은 그대로 둔다.</summary>
+            private static void Replace(MemoryTable table, object[] row, int[] written)
             {
                 var old = Find(table, row);
-                if (old != null) Array.Copy(row, old, row.Length);
+                if (old == null) return;
+                foreach (var ordinal in written) old[ordinal] = row[ordinal];
             }
 
             private static void Delete(MemoryTable table, object[] row)
@@ -335,6 +345,104 @@ namespace MigrationStudio.Tests.Engine.Fakes
             if (r == null) return null;
             return new CheckpointRecord { Job = r.Job, TaskKey = r.TaskKey, Column = r.Column, Value = r.Value, RangeFrom = r.RangeFrom,
                 RangeTo = r.RangeTo, RowsDone = r.RowsDone, RowsTotal = r.RowsTotal, Status = r.Status, RunId = r.RunId, UpdatedAt = r.UpdatedAt };
+        }
+    }
+
+    /// <summary>
+    /// 메모리 삭제 대조 저장소. 키 정규화는 값의 불변 문화권 문자열, 해시는 바꿔 끼울 수 있다(충돌 시험용).
+    /// 표시 열은 매핑의 MarkColumn, 값은 MarkValue(SYSDATE면 대조 시각 대신 고정 시각).
+    /// </summary>
+    internal sealed class MemoryReconcileStore : IReconcileStore
+    {
+        private readonly MemoryTable _source;
+        private readonly MemoryTable _target;
+
+        internal MemoryReconcileStore(MemoryTable source, MemoryTable target)
+        {
+            _source = source;
+            _target = target;
+        }
+
+        internal Func<string, long> Hash { get; set; } = text => (long)(uint)StringComparer.Ordinal.GetHashCode(text);
+        internal int FailOpen { get; set; }
+        internal int MarkCalls { get; private set; }
+        internal int CountCalls { get; private set; }
+        /// <summary>원본 키 스트림을 비우기(원본 접속 실수 흉내).</summary>
+        internal bool EmptySource { get; set; }
+
+        public Task<long> CountAsync(PlanItem item, bool target, CancellationToken cancellationToken)
+        {
+            CountCalls++;
+            var table = target ? _target : _source;
+            var mark = target && DeleteModes.IsMark(item.Mapping.DeleteMode) ? table.Ordinal(item.Mapping.MarkColumn) : -1;
+            lock (table.Gate) return Task.FromResult((long)table.Rows.Count(r => mark < 0 || r[mark] == null || r[mark] == DBNull.Value));
+        }
+
+        public Task<IKeyStream> OpenKeysAsync(PlanItem item, bool target, CancellationToken cancellationToken)
+        {
+            if (FailOpen-- > 0) throw new InvalidOperationException("ORA-00942: 테이블 또는 뷰가 존재하지 않습니다");
+            var table = target ? _target : _source;
+            var keyColumns = item.Mapping.MergeKey.Select(k =>
+            {
+                var cm = item.Mapping.FindColumn(k);
+                return target ? table.Ordinal(k) : table.Ordinal(cm != null ? cm.Source : k);
+            }).ToList();
+            var mark = target && DeleteModes.IsMark(item.Mapping.DeleteMode) ? table.Ordinal(item.Mapping.MarkColumn) : -1;
+            List<KeyEntry> entries;
+            lock (table.Gate)
+            {
+                entries = (EmptySource && !target ? new List<object[]>() : table.Rows).Select(r =>
+                {
+                    var text = string.Join("\u001f", keyColumns.Select(o => Convert.ToString(r[o], CultureInfo.InvariantCulture)));
+                    return new KeyEntry
+                    {
+                        Text = text, Hash = Hash(text),
+                        RowId = target ? text : null,
+                        Marked = mark >= 0 && r[mark] != null && r[mark] != DBNull.Value
+                    };
+                }).OrderBy(e => e.Hash).ToList();
+            }
+            return Task.FromResult<IKeyStream>(new Stream(entries));
+        }
+
+        public Task<int> SetMarkAsync(PlanItem item, IReadOnlyList<KeyEntry> keys, bool mark, CancellationToken cancellationToken)
+        {
+            MarkCalls++;
+            var markOrdinal = _target.Ordinal(item.Mapping.MarkColumn);
+            var keyColumns = item.Mapping.MergeKey.Select(k => _target.Ordinal(k)).ToList();
+            var wanted = new HashSet<string>(keys.Select(k => k.RowId), StringComparer.Ordinal);
+            var changed = 0;
+            lock (_target.Gate)
+            {
+                foreach (var row in _target.Rows)
+                {
+                    var text = string.Join("\u001f", keyColumns.Select(o => Convert.ToString(row[o], CultureInfo.InvariantCulture)));
+                    var isMarked = row[markOrdinal] != null && row[markOrdinal] != DBNull.Value;
+                    if (!wanted.Contains(text) || isMarked == mark) continue;
+                    row[markOrdinal] = mark ? (object)item.Mapping.MarkValue : null;
+                    changed++;
+                }
+            }
+            return Task.FromResult(changed);
+        }
+
+        /// <summary>한 번에 2개씩만 돌려줘서 같은 해시 묶음이 배치 경계를 넘는 경우도 지나가게 한다.</summary>
+        private sealed class Stream : IKeyStream
+        {
+            private readonly List<KeyEntry> _entries;
+            private int _position;
+
+            internal Stream(List<KeyEntry> entries) { _entries = entries; }
+
+            public Task<List<KeyEntry>> ReadAsync(int maxRows, CancellationToken cancellationToken)
+            {
+                var take = Math.Min(Math.Min(maxRows, 2), _entries.Count - _position);
+                var result = take <= 0 ? new List<KeyEntry>() : _entries.GetRange(_position, take);
+                _position += Math.Max(0, take);
+                return Task.FromResult(result);
+            }
+
+            public void Dispose() { }
         }
     }
 

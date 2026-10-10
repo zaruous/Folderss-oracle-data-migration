@@ -276,6 +276,32 @@ namespace MigrationStudio.Ui.Pages
                 Kit.Field("트랜잭션 단위", CommitCombo(s), false, null),
                 Kit.Field("Fetch 크기", FetchCombo(s), false, null),
                 Kit.Field("병렬 작업자", WorkersSegment(s), false, "체크포인트 키 범위를 나눠 작업자마다 따로 읽고 씁니다(세션 " + s.Workers.ToString(CultureInfo.InvariantCulture) + "개)")));
+            if (s.Mode == ExecutionModes.Cdc)
+            {
+                _strategyHost.Children.Add(Kit.FormGrid(2,
+                    Kit.Field("동기화 주기", PollCombo(s), false, "주기마다 워터마크 다음 행을 읽어 반영합니다. 동기화 중 병렬 작업자는 1로 돕니다."),
+                    Kit.Field("최대 실행 시간", MaxRunCombo(s), false, s.MaxRunHours > 0
+                        ? "지나면 자동 종료합니다. 다시 시작하면 워터마크 다음부터 이어 갑니다."
+                        : "무기한: 중지 버튼을 누를 때까지 돕니다. 잊으면 계속 쓰므로 종료 시간을 두는 편이 안전합니다.")));
+            }
+
+            if (s.Mode == ExecutionModes.Cdc || s.Mode == ExecutionModes.Incremental)
+            {
+                var fields = new List<UIElement>
+                {
+                    Kit.Field("지연 창", LagCombo(s), false,
+                        "체크포인트 열이 날짜·시각이면 원본 시각에서 이만큼 뺀 시각까지만 읽습니다. 수정시각은 과거인데 커밋이 늦은 행을 놓치지 않기 위한 여유로, 가장 긴 트랜잭션보다 길게 두되 그만큼 반영이 늦어집니다."),
+                    Kit.Field("삭제 표시 상한", RatioCombo(s), false,
+                        "한 번의 대조에서 살아 있는 대상 행의 이 비율(최소 10행)을 넘게 표시해야 하면 표시하지 않고 멈춥니다. 접속·조건 실수로 대량 표시하는 것을 막습니다.")
+                };
+                if (s.Mode == ExecutionModes.Cdc)
+                {
+                    fields.Add(Kit.Field("삭제 대조 주기", ReconcileCombo(s), false,
+                        "원본·대상 키 전체를 비교하는 주기. 테이블 크기에 비례해 원본에 부하가 가므로 동기화 주기보다 길게 둡니다. 삭제를 따라가지 않는 매핑은 이때 행 수만 셉니다."));
+                }
+
+                _strategyHost.Children.Add(Kit.FormGrid(2, fields.ToArray()));
+            }
             var prefixBox = new TextBox { Width = 92, FontFamily = Theme.Mono, Text = s.ErrorTable ?? "" };
             prefixBox.TextChanged += (a, b) => { s.ErrorTable = prefixBox.Text; _state.MarkChanged(); };
             var errItems = new List<Kit.RadioCardItem>
@@ -291,15 +317,156 @@ namespace MigrationStudio.Ui.Pages
         {
             if (mode == ExecutionModes.Incremental)
             {
-                return "증분 기준 열·체크포인트로 이어서 읽습니다.";
+                return "매핑의 체크포인트 열 기준으로 지난 실행의 마지막 키(워터마크) 다음 행만 읽습니다. 쓰기 방식은 INSERT+UPDATE를 권장합니다.";
             }
 
             if (mode == ExecutionModes.Cdc)
             {
-                return "LogMiner·GoldenGate 연동은 다음 단계 범위입니다.";
+                return "수정시각·증가 키(체크포인트 열) 기준으로 주기마다 추가·변경을 반영합니다. 삭제는 따라가지 않습니다(옵션은 다음 단계).";
             }
 
             return "전체 테이블/쿼리를 처음부터 이관합니다.";
+        }
+
+        private ComboBox PollCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 30, 60, 300, 900, 3600 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add(n < 60 ? n + "초" : n / 60 + "분");
+            }
+
+            var idx = Array.IndexOf(choices, s.PollIntervalSeconds);
+            if (idx < 0)
+            {
+                box.Items.Add(s.PollIntervalSeconds + "초");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.PollIntervalSeconds = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                }
+            };
+            return box;
+        }
+
+        private ComboBox RatioCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 0.01, 0.05, 0.1, 0.3, 1.0 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add((n * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%");
+            }
+
+            var idx = Array.FindIndex(choices, c => Math.Abs(c - s.DeleteMaxRatio) < 1e-9);
+            if (idx < 0)
+            {
+                box.Items.Add((s.DeleteMaxRatio * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.DeleteMaxRatio = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                }
+            };
+            return box;
+        }
+
+        private ComboBox ReconcileCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 15, 60, 360, 1440 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add(n < 60 ? n + "분" : n / 60 + "시간");
+            }
+
+            var idx = Array.IndexOf(choices, s.ReconcileIntervalMinutes);
+            if (idx < 0)
+            {
+                box.Items.Add(s.ReconcileIntervalMinutes + "분");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.ReconcileIntervalMinutes = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                }
+            };
+            return box;
+        }
+
+        private ComboBox LagCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 0, 60, 300, 900, 1800, 3600 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add(n == 0 ? "없음(원본 현재 시각까지)" : n < 60 ? n + "초" : n / 60 + "분");
+            }
+
+            var idx = Array.IndexOf(choices, s.LagSeconds);
+            if (idx < 0)
+            {
+                box.Items.Add(s.LagSeconds + "초");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.LagSeconds = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                }
+            };
+            return box;
+        }
+
+        private ComboBox MaxRunCombo(MigrationStrategy s)
+        {
+            var choices = new[] { 1, 8, 24, 72, 0 };
+            var box = new ComboBox();
+            foreach (var n in choices)
+            {
+                box.Items.Add(n == 0 ? "무기한(중지할 때까지)" : n + "시간");
+            }
+
+            var idx = Array.IndexOf(choices, s.MaxRunHours);
+            if (idx < 0)
+            {
+                box.Items.Add(s.MaxRunHours + "시간");
+                idx = box.Items.Count - 1;
+            }
+
+            box.SelectedIndex = idx;
+            box.SelectionChanged += (a, b) =>
+            {
+                if (box.SelectedIndex >= 0 && box.SelectedIndex < choices.Length)
+                {
+                    s.MaxRunHours = choices[box.SelectedIndex];
+                    _state.MarkChanged();
+                    RebuildStrategy();
+                }
+            };
+            return box;
         }
 
         private ComboBox CommitCombo(MigrationStrategy s)

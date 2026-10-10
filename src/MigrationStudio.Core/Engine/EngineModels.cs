@@ -19,6 +19,15 @@ namespace MigrationStudio.Core.Engine
         }
     }
 
+    /// <summary>실행 모드(RunSpec.RunMode). SYNC는 CDC(변경동기화): 워터마크 이후 행을 주기마다 반복해서 읽는다.</summary>
+    public static class RunModes
+    {
+        public const string Dry = "DRY";
+        public const string Execute = "EXECUTE";
+        public const string Resume = "RESUME";
+        public const string Sync = "SYNC";
+    }
+
     public sealed class EndpointSpec
     {
         public ConnectionTarget Connection { get; set; }
@@ -66,6 +75,8 @@ namespace MigrationStudio.Core.Engine
         public long Rows { get; set; }
         public string Last { get; set; }
         public long BaseRows { get; set; }
+        /// <summary>지연 창 상한(체크포인트 열 ≤ 이 값만 읽음). 날짜·시각 체크포인트의 증분·동기화에서만 쓴다.</summary>
+        public string Upper { get; set; }
     }
 
     public sealed class WriteResult
@@ -116,6 +127,25 @@ namespace MigrationStudio.Core.Engine
         public List<TaskSnapshot> Tasks { get; set; } = new List<TaskSnapshot>();
         public PipelineSnapshot Pipeline { get; set; } = new PipelineSnapshot();
         public TotalsSnapshot Totals { get; set; } = new TotalsSnapshot();
+        /// <summary>SYNC(변경동기화)일 때만. 주기 번호·시각과 주기 누적 합계.</summary>
+        public SyncSnapshot Sync { get; set; }
+    }
+
+    public sealed class SyncSnapshot
+    {
+        /// <summary>지금 돌고 있거나 마지막으로 끝난 주기 번호(1부터).</summary>
+        public int Cycle { get; set; }
+        /// <summary>cycle(주기 실행 중) · waiting(다음 주기 대기).</summary>
+        public string Phase { get; set; }
+        public DateTime? LastCycleAt { get; set; }
+        public DateTime? NextCycleAt { get; set; }
+        public int IntervalSeconds { get; set; }
+        public int MaxRunHours { get; set; }
+        public long Written { get; set; }
+        public long Inserted { get; set; }
+        public long Updated { get; set; }
+        public long Rejected { get; set; }
+        public int ConsecutiveFailures { get; set; }
     }
 
     public sealed class TaskSnapshot
@@ -135,6 +165,39 @@ namespace MigrationStudio.Core.Engine
         public double Elapsed { get; set; }
         public double RateNow { get; set; }
         public List<RangeSnapshot> Ranges { get; set; } = new List<RangeSnapshot>();
+        /// <summary>마지막 삭제 대조 결과(증분·CDC에서만). 없으면 null.</summary>
+        public ReconcileSnapshot Reconcile { get; set; }
+    }
+
+    /// <summary>
+    /// 삭제 대조 한 번의 결과. NONE이면 행 수만(원본 범위 · 대상 전체), MARK면 키 비교 결과와 표시한 수.
+    /// 화면은 이것으로 "원본에 없는 대상 행"을 숨기지 않고 보여 준다.
+    /// </summary>
+    public sealed class ReconcileSnapshot
+    {
+        public DateTime At { get; set; }
+        /// <summary><see cref="Model.DeleteModes"/> 값.</summary>
+        public string Mode { get; set; }
+        public long SourceRows { get; set; }
+        /// <summary>대상 행 수. MARK면 표시 안 된(살아 있는) 행만.</summary>
+        public long TargetRows { get; set; }
+        /// <summary>원본에 없는 대상 행(아직 표시 안 됨).</summary>
+        public long MarkCandidates { get; set; }
+        /// <summary>원본에 다시 있는데 표시된 행.</summary>
+        public long UnmarkCandidates { get; set; }
+        public long AlreadyMarked { get; set; }
+        public long SourceOnly { get; set; }
+        /// <summary>이번 대조에서 실제로 표시·표시 해제한 행.</summary>
+        public long Marked { get; set; }
+        public long Unmarked { get; set; }
+        /// <summary>이 실행에서 표시한 행 누적.</summary>
+        public long TotalMarked { get; set; }
+        public bool Approved { get; set; }
+        /// <summary>표시하지 않은 이유(승인 전 제외): 상한 초과·원본 0행 등. 없으면 null.</summary>
+        public string Blocked { get; set; }
+        public string Error { get; set; }
+        /// <summary>표시 후보 키 표본(최대 5개, 여러 열이면 ", "로 이음).</summary>
+        public List<string> Samples { get; set; } = new List<string>();
     }
 
     public sealed class RangeSnapshot
@@ -174,6 +237,12 @@ namespace MigrationStudio.Core.Engine
     public interface ISourceFactory
     {
         Task<ISourceReader> OpenAsync(PlanItem item, KeyRange range, string lastValue, int fetchSize, CancellationToken cancellationToken);
+    }
+
+    /// <summary>원본 DB의 현재 시각. 지연 창 상한은 클라이언트 시계가 아니라 이 값으로 잰다(시계가 다르면 창이 어긋난다).</summary>
+    public interface ISourceClock
+    {
+        Task<DateTime> NowAsync(CancellationToken cancellationToken);
     }
 
     public interface ISourceProbe
